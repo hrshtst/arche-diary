@@ -1,0 +1,18 @@
+# Byte- and native-compiled Emacs Lisp
+*.elc
+*.eln
+
+# Emacs backup, autosave, and lock files
+*~
+\#*\#
+.\#*
+auto-save-list/
+
+# straight.el and package manager artifacts
+/.eldev/
+/.cask/
+/eln-cache/
+
+# OS junk
+.DS_Store
+Thumbs.db
