@@ -26,12 +26,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 
 ```elisp
 (use-package arche-diary
-  :straight (:host github :repo "hrshtst/arche-diary")
-  :commands (arche-diary-open-month
-             arche-diary-add-date
-             arche-diary-visit-date
-             arche-diary-fill-dates
-             arche-diary-export-html))
+  :straight (:host github :repo "hrshtst/arche-diary"))
 ```
 
 ## Commands
