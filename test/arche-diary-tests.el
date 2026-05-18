@@ -394,6 +394,205 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should (string-match-p "2026-04\\.html" html))
       (should-not (string-match-p "2026-06\\.html" html)))))
 
+;;;; insert-image
+
+(ert-deftest arche-diary-tests/insert-image-copies-and-links ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "shot.png" tmpdir)))
+      (with-temp-file src (insert "PNGDATA"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src)
+        (let ((s (buffer-string)))
+          (should (string-match-p "#\\+CAPTION: " s))
+          (should (string-match-p "#\\+NAME: fig:shot\n" s))
+          (should (string-match-p
+                   "#\\+ATTR_HTML: :width 400 :align left\n" s))
+          (should (string-match-p
+                   "\\[\\[file:images/2026-05-15/shot\\.png\\]\\]" s)))
+        (should (file-exists-p
+                 (expand-file-name "images/2026-05-15/shot.png"
+                                   arche-diary-directory)))))))
+
+(ert-deftest arche-diary-tests/insert-image-no-copy-links-source ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "pic.png" tmpdir)))
+      (with-temp-file src (insert "DATA"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src t)
+        (should (string-match-p
+                 (regexp-quote
+                  (format "[[file:%s]]"
+                          (file-relative-name src arche-diary-directory)))
+                 (buffer-string)))
+        (should-not (file-directory-p arche-diary-image-directory))))))
+
+(ert-deftest arche-diary-tests/insert-image-absolute-link ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-image-link-type 'absolute)
+          (src (expand-file-name "a.png" tmpdir)))
+      (with-temp-file src (insert "X"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src)
+        (should (string-match-p
+                 (regexp-quote
+                  (format "[[file:%s]]"
+                          (expand-file-name "images/2026-05-15/a.png"
+                                            arche-diary-directory)))
+                 (buffer-string)))))))
+
+(ert-deftest arche-diary-tests/insert-image-no-date-subdir ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-image-date-subdir nil)
+          (src (expand-file-name "b.png" tmpdir)))
+      (with-temp-file src (insert "X"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src)
+        (should (file-exists-p
+                 (expand-file-name "images/b.png" arche-diary-directory)))
+        (should (string-match-p "\\[\\[file:images/b\\.png\\]\\]"
+                                (buffer-string)))))))
+
+(ert-deftest arche-diary-tests/insert-image-requires-date-heading ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "c.png" tmpdir)))
+      (with-temp-file src (insert "X"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (goto-char (point-max))
+        (should-error (arche-diary-insert-image src) :type 'user-error)))))
+
+(ert-deftest arche-diary-tests/insert-image-name-uniquified ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "dup.png" tmpdir)))
+      (with-temp-file src (insert "X"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src)
+        (goto-char (point-max))
+        (arche-diary-insert-image src)
+        (let ((s (buffer-string)))
+          (should (string-match-p "#\\+NAME: fig:dup\n" s))
+          (should (string-match-p "#\\+NAME: fig:dup-2\n" s)))))))
+
+(defun arche-diary-tests--count (re s)
+  "Return the number of non-overlapping matches of RE in S."
+  (let ((n 0) (start 0))
+    (while (string-match re s start)
+      (setq n (1+ n) start (match-end 0)))
+    n))
+
+(ert-deftest arche-diary-tests/insert-image-gallery-wraps ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "g.png" tmpdir)))
+      (with-temp-file src (insert "X"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src nil t)
+        (let ((s (buffer-string)))
+          (should (string-match-p "#\\+begin_gallery\n" s))
+          (should (string-match-p "#\\+end_gallery\n" s))
+          (should (string-match-p "#\\+ATTR_HTML: :width 220" s))
+          (should (string-match-p
+                   "\\[\\[file:images/2026-05-15/g\\.png\\]\\]" s))
+          ;; link sits between the begin and end markers
+          (should (< (string-match "#\\+begin_gallery" s)
+                     (string-match "\\[\\[file:" s)
+                     (string-match "#\\+end_gallery" s))))))))
+
+(ert-deftest arche-diary-tests/insert-image-gallery-extends ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (a (expand-file-name "p1.png" tmpdir))
+          (b (expand-file-name "p2.png" tmpdir)))
+      (with-temp-file a (insert "A"))
+      (with-temp-file b (insert "B"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image a nil t)
+        (arche-diary-insert-image b nil t)
+        (let ((s (buffer-string)))
+          ;; Still a single wrapper holding both images.
+          (should (= 1 (arche-diary-tests--count "#\\+begin_gallery" s)))
+          (should (= 1 (arche-diary-tests--count "#\\+end_gallery" s)))
+          (should (= 2 (arche-diary-tests--count "#\\+NAME: fig:" s)))
+          (should (string-match-p
+                   "\\[\\[file:images/2026-05-15/p1\\.png\\]\\]" s))
+          (should (string-match-p
+                   "\\[\\[file:images/2026-05-15/p2\\.png\\]\\]" s))
+          (should (< (string-match "#\\+begin_gallery" s)
+                     (string-match "p1\\.png" s)
+                     (string-match "p2\\.png" s)
+                     (string-match "#\\+end_gallery" s))))))))
+
+(ert-deftest arche-diary-tests/export-renders-gallery ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (a (expand-file-name "x1.png" tmpdir))
+          (b (expand-file-name "x2.png" tmpdir)))
+      (with-temp-file a (insert "A"))
+      (with-temp-file b (insert "B"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (insert "** Trip\n")
+        (arche-diary-insert-image a nil t)
+        (arche-diary-insert-image b nil t)
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html"
+                                       arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p "<div class=\"gallery\"" html))
+        (should (string-match-p "src=\"images/2026-05-15/x1\\.png\"" html))
+        (should (string-match-p "src=\"images/2026-05-15/x2\\.png\"" html))
+        (should (file-exists-p
+                 (expand-file-name "images/2026-05-15/x2.png"
+                                   arche-diary-html-directory)))))))
+
+(ert-deftest arche-diary-tests/export-renders-image ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (src (expand-file-name "e.png" tmpdir)))
+      (with-temp-file src (insert "PNG"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (insert "** Photo\n")
+        (arche-diary-insert-image src)
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html"
+                                       arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p
+                 "<img[^>]*src=\"images/2026-05-15/e\\.png\"" html))
+        (should (file-exists-p
+                 (expand-file-name "images/2026-05-15/e.png"
+                                   arche-diary-html-directory)))))))
+
+
 (provide 'arche-diary-tests)
 
 ;;; arche-diary-tests.el ends here

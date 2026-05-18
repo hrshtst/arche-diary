@@ -122,6 +122,22 @@ hr.note-sep { border-top:1px dashed #eee; margin:1rem 0; }
 article.date { margin-bottom:1rem; }
 section.note { margin:1rem 0; }
 section.note p { margin:.5rem 0; }
+img { max-width:100%; height:auto; }
+.figure { margin:1rem 0; display:flow-root; }
+.figure p { margin:.3rem 0; }
+.figure-number { color:var(--muted); font-style:italic; }
+/* Org maps #+ATTR_HTML :align onto the deprecated `align' attribute,
+   which browsers render as a float and makes images overlap the text
+   that follows.  Treat it as block alignment instead. */
+.figure img, section.note img { float:none; display:block;
+  margin:.3rem 0; }
+img[align=\"left\"]   { margin-right:auto; }
+img[align=\"center\"] { margin-left:auto; margin-right:auto; }
+img[align=\"right\"]  { margin-left:auto; }
+section.note { display:flow-root; }
+.gallery { display:flex; flex-wrap:wrap; gap:1rem;
+           align-items:flex-end; margin:1rem 0; }
+.gallery .figure { margin:0; }
 "
   "CSS embedded in every exported HTML page."
   :group 'arche-diary
@@ -136,6 +152,51 @@ section.note p { margin:.5rem 0; }
   "Hook run after a successful HTML export."
   :group 'arche-diary
   :type 'hook)
+
+(defcustom arche-diary-image-copy t
+  "If non-nil, copy inserted images into `arche-diary-image-directory'.
+When nil, `arche-diary-insert-image' links the original file in place.
+A prefix argument to `arche-diary-insert-image' inverts this."
+  :group 'arche-diary
+  :type 'boolean)
+
+(defcustom arche-diary-image-directory
+  (expand-file-name "images" (expand-file-name "diary" "~"))
+  "Directory under which `arche-diary-insert-image' copies images."
+  :group 'arche-diary
+  :type 'directory)
+
+(defcustom arche-diary-image-date-subdir t
+  "If non-nil, copy images into a subdirectory named by their date.
+The date is taken from the diary date heading point is under."
+  :group 'arche-diary
+  :type 'boolean)
+
+(defcustom arche-diary-image-link-type 'relative
+  "How `arche-diary-insert-image' writes the inserted file link.
+Either `relative' (to `arche-diary-directory') or `absolute'."
+  :group 'arche-diary
+  :type '(choice (const :tag "Relative to diary directory" relative)
+                 (const :tag "Absolute" absolute)))
+
+(defcustom arche-diary-image-width 400
+  "Default value written as `#+ATTR_HTML: :width' for inserted images."
+  :group 'arche-diary
+  :type '(choice integer string))
+
+(defcustom arche-diary-image-gallery-width 220
+  "Default `#+ATTR_HTML: :width' for images inserted into a gallery.
+Used instead of `arche-diary-image-width' when
+`arche-diary-insert-image' inserts into a `#+begin_gallery' block,
+so several images fit on one row.  Edit per image afterwards."
+  :group 'arche-diary
+  :type '(choice integer string))
+
+(defcustom arche-diary-image-align 'left
+  "Default `#+ATTR_HTML: :align' for inserted images.
+The symbol `none' omits the `:align' attribute entirely."
+  :group 'arche-diary
+  :type '(choice (const left) (const center) (const right) (const none)))
 
 
 ;;; Time helpers
@@ -521,6 +582,118 @@ Leaves point on the blank line right after the heading."
     latest))
 
 
+;;; Image helpers
+
+(defconst arche-diary--image-extensions
+  '("png" "jpg" "jpeg" "gif" "svg" "webp" "bmp" "tiff" "tif")
+  "Recognized image file extensions (lower-case, no leading dot).")
+
+(defun arche-diary--image-file-p (path)
+  "Return non-nil if PATH has a recognized image extension."
+  (let ((ext (file-name-extension path)))
+    (and ext (member (downcase ext) arche-diary--image-extensions) t)))
+
+(defun arche-diary--files-identical-p (a b)
+  "Return non-nil if files A and B exist with byte-identical contents."
+  (and (file-readable-p a) (file-readable-p b)
+       (= (file-attribute-size (file-attributes a))
+          (file-attribute-size (file-attributes b)))
+       (with-temp-buffer
+         (let ((coding-system-for-read 'no-conversion))
+           (insert-file-contents-literally a)
+           (let ((ca (buffer-string)))
+             (erase-buffer)
+             (insert-file-contents-literally b)
+             (string= ca (buffer-string)))))))
+
+(defun arche-diary--enclosing-date-iso ()
+  "Return the ISO date of the date heading point is under.
+Signal a `user-error' if point is not under any date heading."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (end-of-line)
+      (if (re-search-backward arche-diary-date-heading-regexp nil t)
+          (match-string-no-properties 1)
+        (user-error "Point is not under a diary date heading")))))
+
+(defun arche-diary--image-dest-path (source iso)
+  "Return the copy destination path for SOURCE.
+When ISO is non-nil and `arche-diary-image-date-subdir' is set, a
+per-date subdirectory is used.  The destination directory is
+created.  An existing, differing file of the same name is avoided
+by appending a numeric suffix."
+  (let* ((dir (if (and arche-diary-image-date-subdir iso)
+                  (expand-file-name iso arche-diary-image-directory)
+                arche-diary-image-directory))
+         (base (file-name-nondirectory source))
+         (stem (file-name-sans-extension base))
+         (ext (file-name-extension base))
+         (dest (expand-file-name base dir))
+         (n 1))
+    (make-directory dir t)
+    (while (and (file-exists-p dest)
+                (not (arche-diary--files-identical-p source dest)))
+      (setq n (1+ n)
+            dest (expand-file-name
+                  (format "%s-%d%s" stem n (if ext (concat "." ext) ""))
+                  dir)))
+    dest))
+
+(defun arche-diary--image-link-string (target)
+  "Return the Org link path for TARGET per `arche-diary-image-link-type'."
+  (let ((abs (expand-file-name target)))
+    (pcase arche-diary-image-link-type
+      ('absolute abs)
+      (_ (file-relative-name
+          abs (file-name-as-directory
+               (expand-file-name arche-diary-directory)))))))
+
+(defun arche-diary--buffer-name-keywords ()
+  "Return all `#+NAME:' values in the current buffer."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (let ((case-fold-search t) names)
+        (while (re-search-forward "^#\\+name:[ \t]+\\(.+?\\)[ \t]*$" nil t)
+          (push (match-string-no-properties 1) names))
+        names))))
+
+(defun arche-diary--image-name-keyword (source)
+  "Return a unique `fig:'-prefixed NAME derived from SOURCE.
+Uniqueness is checked against existing `#+NAME:' keywords in the
+current buffer."
+  (let* ((stem (file-name-sans-extension (file-name-nondirectory source)))
+         (slug (replace-regexp-in-string "[^A-Za-z0-9]+" "-" stem))
+         (slug (replace-regexp-in-string "\\`-+\\|-+\\'" "" slug))
+         (slug (if (string-empty-p slug) "image" slug))
+         (base (concat "fig:" slug))
+         (existing (arche-diary--buffer-name-keywords))
+         (name base)
+         (n 1))
+    (while (member name existing)
+      (setq n (1+ n) name (format "%s-%d" base n)))
+    name))
+
+(defun arche-diary--gallery-end-position ()
+  "Return the buffer position of the `#+end_gallery' line point is in.
+Point is considered inside a gallery when it lies between a
+`#+begin_gallery' line and the next `#+end_gallery' line.  Return
+nil when point is not inside such a block."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (let ((case-fold-search t)
+            (origin (point)))
+        (end-of-line)
+        (when (re-search-backward "^[ \t]*#\\+begin_gallery\\b" nil t)
+          (let ((beg (line-beginning-position)))
+            (when (re-search-forward "^[ \t]*#\\+end_gallery\\b" nil t)
+              (let ((end (line-beginning-position)))
+                (and (<= beg origin) (<= origin end) end)))))))))
+
+
 ;;; Public commands
 
 ;;;###autoload
@@ -630,6 +803,100 @@ argument, prompt for both bounds."
                                      (make-decoded-time :day 1)))))
       (message "arche-diary: added %d date(s)" count))))
 
+;;;###autoload
+(defun arche-diary-insert-image (source &optional no-copy gallery)
+  "Insert an Org image link at point for SOURCE.
+
+By default SOURCE is copied into `arche-diary-image-directory'
+\(optionally into a per-date subdirectory named by the date
+heading point is under) and the copy is linked; with NO-COPY
+non-nil the original file is linked in place.
+
+With GALLERY non-nil the image block is placed inside a
+`#+begin_gallery' .. `#+end_gallery' wrapper, which the HTML
+export lays out as a wrapping horizontal row.  If point is
+already inside such a block the image is appended to it;
+otherwise a new wrapper is created.  Gallery images use
+`arche-diary-image-gallery-width' instead of
+`arche-diary-image-width'.
+
+Called interactively, the image file is prompted for; a single
+prefix argument (\\[universal-argument]) inverts
+`arche-diary-image-copy' for that call, and a double prefix
+argument (\\[universal-argument] \\[universal-argument]) inserts
+into a gallery.
+
+A `#+CAPTION:' placeholder, a `#+NAME: fig:...' keyword and a
+`#+ATTR_HTML:' line are inserted before the link, and point is
+left on the caption line."
+  (interactive
+   (list (read-file-name "Image file: " nil nil t)
+         (if (equal current-prefix-arg '(4))
+             arche-diary-image-copy
+           (not arche-diary-image-copy))
+         (equal current-prefix-arg '(16))))
+  (setq source (expand-file-name source))
+  (unless (file-readable-p source)
+    (user-error "Cannot read image file: %s" source))
+  (let* ((copy (not no-copy))
+         (iso (and copy arche-diary-image-date-subdir
+                   (arche-diary--enclosing-date-iso)))
+         (target
+          (if copy
+              (let ((dest (arche-diary--image-dest-path source iso)))
+                (unless (and (file-exists-p dest)
+                             (arche-diary--files-identical-p source dest))
+                  (copy-file source dest t))
+                dest)
+            source))
+         (link (arche-diary--image-link-string target))
+         (name (arche-diary--image-name-keyword source))
+         (width (if gallery
+                    arche-diary-image-gallery-width
+                  arche-diary-image-width))
+         (attr (concat
+                (format "#+ATTR_HTML: :width %s" width)
+                (unless (eq arche-diary-image-align 'none)
+                  (format " :align %s" arche-diary-image-align))))
+         (block (format "#+CAPTION: \n#+NAME: %s\n%s\n[[file:%s]]\n"
+                        name attr link))
+         (gpos (and gallery (arche-diary--gallery-end-position))))
+    (cond
+     (gpos
+      ;; Append to the gallery point is already inside.
+      (goto-char gpos)
+      (unless (save-excursion (forward-line -1)
+                              (looking-at-p "^[ \t]*$"))
+        (insert "\n"))
+      (let ((caption-pos (point)))
+        (insert block)
+        (goto-char caption-pos)
+        (end-of-line)))
+     (gallery
+      ;; Wrap the image in a new gallery block.
+      (unless (bolp) (insert "\n"))
+      (unless (or (bobp)
+                  (save-excursion (forward-line -1)
+                                  (looking-at-p "^[ \t]*$")))
+        (insert "\n"))
+      (insert "#+begin_gallery\n")
+      (let ((caption-pos (point)))
+        (insert block "#+end_gallery\n")
+        (unless (or (eobp) (looking-at-p "^[ \t]*$")) (insert "\n"))
+        (goto-char caption-pos)
+        (end-of-line)))
+     (t
+      (unless (bolp) (insert "\n"))
+      (unless (or (bobp)
+                  (save-excursion (forward-line -1)
+                                  (looking-at-p "^[ \t]*$")))
+        (insert "\n"))
+      (let ((caption-pos (point)))
+        (insert block)
+        (unless (or (eobp) (looking-at-p "^[ \t]*$")) (insert "\n"))
+        (goto-char caption-pos)
+        (end-of-line))))))
+
 
 ;;; HTML export
 
@@ -641,14 +908,56 @@ argument, prompt for both bounds."
     (setq s (replace-regexp-in-string ">" "&gt;" s t t))
     s))
 
+(defun arche-diary--export-image-dest (abs-src)
+  "Return (RELDEST . ABSDEST) for ABS-SRC in the html image tree.
+RELDEST is forward-slashed and relative to
+`arche-diary-html-directory'; ABSDEST is its absolute path.
+Images under `arche-diary-image-directory' keep their subtree."
+  (let* ((img-root (file-name-as-directory
+                    (expand-file-name arche-diary-image-directory)))
+         (sub (file-name-as-directory
+               (file-name-nondirectory
+                (directory-file-name arche-diary-image-directory))))
+         (abs (expand-file-name abs-src))
+         (rel (if (string-prefix-p img-root abs)
+                  (concat sub (substring abs (length img-root)))
+                (concat sub (file-name-nondirectory abs)))))
+    (cons rel (expand-file-name rel arche-diary-html-directory))))
+
+(defun arche-diary--rewrite-image-links-for-export (str)
+  "Copy images linked from STR into the html dir.
+Return STR with those file links rewritten to paths relative to
+`arche-diary-html-directory' so the exported page is
+self-contained."
+  (replace-regexp-in-string
+   "\\[\\[file:\\([^]]+?\\)\\]\\(\\[[^]]*\\]\\)?\\]"
+   (lambda (m)
+     (let* ((path (match-string 1 m))
+            (desc (or (match-string 2 m) ""))
+            (abs (expand-file-name path arche-diary-directory)))
+       (if (and (arche-diary--image-file-p abs) (file-readable-p abs))
+           (let* ((d (arche-diary--export-image-dest abs))
+                  (reldest (car d))
+                  (absdest (cdr d)))
+             (make-directory (file-name-directory absdest) t)
+             (unless (and (file-exists-p absdest)
+                          (arche-diary--files-identical-p abs absdest))
+               (copy-file abs absdest t))
+             (format "[[file:%s]%s]" reldest desc))
+         m)))
+   str t t))
+
 (defun arche-diary--org-string-to-html (str)
-  "Render Org-formatted STR to an HTML fragment (body only)."
-  (let ((org-export-with-toc nil)
-        (org-export-with-section-numbers nil)
-        (org-export-with-broken-links t)
-        (org-export-with-author nil)
-        (org-export-with-creator nil)
-        (org-export-with-title nil))
+  "Render Org-formatted STR to an HTML fragment (body only).
+Image file links are copied into the html directory and
+rewritten so the exported page can resolve them."
+  (let* ((org-export-with-toc nil)
+         (org-export-with-section-numbers nil)
+         (org-export-with-broken-links t)
+         (org-export-with-author nil)
+         (org-export-with-creator nil)
+         (org-export-with-title nil)
+         (str (arche-diary--rewrite-image-links-for-export str)))
     (string-trim (or (org-export-string-as str 'html t) ""))))
 
 (defun arche-diary--collect-notes-after-point (bound)

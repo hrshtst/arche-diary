@@ -37,6 +37,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-add-date`   | Insert a date heading into the current monthly buffer. |
 | `arche-diary-visit-date` | Open the appropriate month and put point at a date heading (creating both if missing). |
 | `arche-diary-fill-dates` | Insert headings for every day in a range. |
+| `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
 | `arche-diary-export-html`| Export one month (or all) to HTML and rebuild `index.html`. |
 
 ### Accepted argument formats
@@ -64,6 +65,61 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 `arche-diary-add-date` rejects a date that does not fall in the buffer's
 month.
 
+### Inserting images
+
+`arche-diary-insert-image` prompts for an image file and inserts, at point:
+
+```
+#+CAPTION:
+#+NAME: fig:filename
+#+ATTR_HTML: :width 400 :align left
+[[file:images/2026-05-15/filename.png]]
+```
+
+By default the file is copied into `arche-diary-image-directory`, under a
+subdirectory named by the date heading point is currently under (so point
+must be inside a day's section). The link is written relative to
+`arche-diary-directory`. A single prefix argument (`C-u`) inverts
+`arche-diary-image-copy` for that one call (link the original in place
+instead of copying, or vice versa); a double prefix argument (`C-u C-u`)
+inserts into a gallery (see below). Point is left on the `#+CAPTION:` line
+so you can type the caption.
+
+On HTML export, every referenced image is copied into
+`arche-diary-html-directory` (mirroring its subtree under `images/`) and the
+`<img>` `src` is rewritten so the exported HTML folder is self-contained.
+
+#### Multiple images in a row (galleries)
+
+Inserted images stack vertically (each is its own block). To lay several
+side by side, call `arche-diary-insert-image` with a **double prefix
+argument** (`C-u C-u`): the image is wrapped in a `#+begin_gallery` ..
+`#+end_gallery` block, which the export renders as a wrapping horizontal
+row. Invoking it again with `C-u C-u` while point is still inside that
+block appends the next image to the same gallery, so a strip is built up
+incrementally:
+
+```org
+#+begin_gallery
+#+CAPTION: morning
+#+NAME: fig:a
+#+ATTR_HTML: :width 220
+[[file:images/2026-05-18/a.png]]
+
+#+CAPTION: noon
+#+NAME: fig:b
+#+ATTR_HTML: :width 220
+[[file:images/2026-05-18/b.png]]
+#+end_gallery
+```
+
+Each image keeps its own `#+CAPTION:`, `#+NAME:` and `#+ATTR_HTML: :width`,
+and the usual copy-into-HTML-dir and `src` rewrite still apply. Gallery
+images default to `arche-diary-image-gallery-width` (220) instead of
+`arche-diary-image-width` so a row fits; edit any `:width` afterwards to
+taste. You can also write the `#+begin_gallery` / `#+end_gallery` wrapper by
+hand around ordinary image blocks — the prefix is just a shortcut.
+
 ## Customization
 
 | Variable | Default | Purpose |
@@ -83,6 +139,13 @@ month.
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
 | `arche-diary-after-export-hook` | nil | Run after a successful export. |
+| `arche-diary-image-copy` | `t` | Copy inserted images vs. link the original. |
+| `arche-diary-image-directory` | `~/diary/images` | Where copied images are stored. |
+| `arche-diary-image-date-subdir` | `t` | Copy into a per-date subdirectory. |
+| `arche-diary-image-link-type` | `relative` | `relative` (to the diary dir) or `absolute`. |
+| `arche-diary-image-width` | `400` | `#+ATTR_HTML: :width` value. |
+| `arche-diary-image-gallery-width` | `220` | `:width` for images inserted into a gallery. |
+| `arche-diary-image-align` | `left` | `#+ATTR_HTML: :align` (`none` omits it). |
 
 If you customize `arche-diary-date-heading-format` you should also update
 `arche-diary-date-heading-regexp` so its first group still captures the ISO
