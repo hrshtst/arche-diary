@@ -16,3 +16,6 @@ auto-save-list/
 # OS junk
 .DS_Store
 Thumbs.db
+
+# Claude Code local files
+/.claude/
