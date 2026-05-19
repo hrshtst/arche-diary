@@ -125,7 +125,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | Variable | Default | Purpose |
 |---|---|---|
 | `arche-diary-directory` | `~/diary` | Where Org files live. |
-| `arche-diary-html-directory` | `~/diary/html` | Where HTML is written. |
+| `arche-diary-html-directory` | nil | Where HTML is written. nil → `html/` under `arche-diary-directory`. |
 | `arche-diary-file-creation-system` | `denote` | `denote` or `plain`. |
 | `arche-diary-title-format` | `"%Y-%m"` | `format-time-string` for the file title. |
 | `arche-diary-filename-format` | `"%Y-%m.org"` | Plain-Org filename template. |
@@ -140,7 +140,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
 | `arche-diary-after-export-hook` | nil | Run after a successful export. |
 | `arche-diary-image-copy` | `t` | Copy inserted images vs. link the original. |
-| `arche-diary-image-directory` | `~/diary/images` | Where copied images are stored. |
+| `arche-diary-image-directory` | nil | Where copied images are stored. nil → `images/` under `arche-diary-directory`. |
 | `arche-diary-image-date-subdir` | `t` | Copy into a per-date subdirectory. |
 | `arche-diary-image-link-type` | `relative` | `relative` (to the diary dir) or `absolute`. |
 | `arche-diary-image-width` | `400` | `#+ATTR_HTML: :width` value. |
@@ -150,6 +150,19 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 If you customize `arche-diary-date-heading-format` you should also update
 `arche-diary-date-heading-regexp` so its first group still captures the ISO
 date.
+
+`arche-diary-html-directory` and `arche-diary-image-directory` default to
+nil, meaning the `html/` and `images/` subdirectories of
+`arche-diary-directory`. These are resolved at call time, so setting only
+`arche-diary-directory` is enough — both follow it, whether you set it
+before or after the package loads. To place HTML or images elsewhere, set
+the corresponding variable to any absolute directory; the two are fully
+independent and may live anywhere (HTML export still produces a
+self-contained folder). One caveat: when `arche-diary-image-directory` is
+outside `arche-diary-directory` and `arche-diary-image-link-type` is
+`relative` (the default), inserted links become `../…` paths — correct, but
+ugly in the buffer; such setups may prefer
+`(setq arche-diary-image-link-type 'absolute)`.
 
 ## Running tests
 

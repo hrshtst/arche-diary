@@ -39,11 +39,14 @@
   :group 'arche-diary
   :type 'directory)
 
-(defcustom arche-diary-html-directory
-  (expand-file-name "html" (expand-file-name "diary" "~"))
-  "Directory where exported HTML files are written."
+(defcustom arche-diary-html-directory nil
+  "Directory where exported HTML files are written.
+When nil, the `html' subdirectory of `arche-diary-directory' is
+used (resolved at call time, so it tracks `arche-diary-directory').
+Set it to any absolute directory to write HTML elsewhere."
   :group 'arche-diary
-  :type 'directory)
+  :type '(choice (const :tag "html/ under the diary directory" nil)
+                 directory))
 
 (defcustom arche-diary-file-creation-system 'denote
   "Backend used to create new monthly diary files.
@@ -160,11 +163,14 @@ A prefix argument to `arche-diary-insert-image' inverts this."
   :group 'arche-diary
   :type 'boolean)
 
-(defcustom arche-diary-image-directory
-  (expand-file-name "images" (expand-file-name "diary" "~"))
-  "Directory under which `arche-diary-insert-image' copies images."
+(defcustom arche-diary-image-directory nil
+  "Directory under which `arche-diary-insert-image' copies images.
+When nil, the `images' subdirectory of `arche-diary-directory' is
+used (resolved at call time, so it tracks `arche-diary-directory').
+Set it to any absolute directory to store images elsewhere."
   :group 'arche-diary
-  :type 'directory)
+  :type '(choice (const :tag "images/ under the diary directory" nil)
+                 directory))
 
 (defcustom arche-diary-image-date-subdir t
   "If non-nil, copy images into a subdirectory named by their date.
@@ -399,6 +405,20 @@ decoded-time list."
 
 ;;; Buffer / file location helpers
 
+(defun arche-diary--html-directory ()
+  "Return the directory exported HTML is written to.
+`arche-diary-html-directory' when non-nil, otherwise the `html'
+subdirectory of `arche-diary-directory'."
+  (or arche-diary-html-directory
+      (expand-file-name "html" arche-diary-directory)))
+
+(defun arche-diary--image-directory ()
+  "Return the directory `arche-diary-insert-image' copies into.
+`arche-diary-image-directory' when non-nil, otherwise the
+`images' subdirectory of `arche-diary-directory'."
+  (or arche-diary-image-directory
+      (expand-file-name "images" arche-diary-directory)))
+
 (defun arche-diary--current-buffer-month ()
   "Return (YEAR . MONTH) inferred from the current buffer's #+title.
 Return nil if no recognizable title is present."
@@ -624,8 +644,8 @@ per-date subdirectory is used.  The destination directory is
 created.  An existing, differing file of the same name is avoided
 by appending a numeric suffix."
   (let* ((dir (if (and arche-diary-image-date-subdir iso)
-                  (expand-file-name iso arche-diary-image-directory)
-                arche-diary-image-directory))
+                  (expand-file-name iso (arche-diary--image-directory))
+                (arche-diary--image-directory)))
          (base (file-name-nondirectory source))
          (stem (file-name-sans-extension base))
          (ext (file-name-extension base))
@@ -913,16 +933,16 @@ left on the caption line."
 RELDEST is forward-slashed and relative to
 `arche-diary-html-directory'; ABSDEST is its absolute path.
 Images under `arche-diary-image-directory' keep their subtree."
-  (let* ((img-root (file-name-as-directory
-                    (expand-file-name arche-diary-image-directory)))
+  (let* ((image-dir (arche-diary--image-directory))
+         (img-root (file-name-as-directory (expand-file-name image-dir)))
          (sub (file-name-as-directory
                (file-name-nondirectory
-                (directory-file-name arche-diary-image-directory))))
+                (directory-file-name image-dir))))
          (abs (expand-file-name abs-src))
          (rel (if (string-prefix-p img-root abs)
                   (concat sub (substring abs (length img-root)))
                 (concat sub (file-name-nondirectory abs)))))
-    (cons rel (expand-file-name rel arche-diary-html-directory))))
+    (cons rel (expand-file-name rel (arche-diary--html-directory)))))
 
 (defun arche-diary--rewrite-image-links-for-export (str)
   "Copy images linked from STR into the html dir.
@@ -1069,11 +1089,12 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
 
 (defun arche-diary--render-month-html (year month)
   "Render `YYYY-MM.html' for YEAR/MONTH.  Return the output path."
-  (let ((path (arche-diary--month-file year month)))
+  (let ((path (arche-diary--month-file year month))
+        (html-dir (arche-diary--html-directory)))
     (unless path
       (user-error "No diary file for %04d-%02d" year month))
-    (unless (file-directory-p arche-diary-html-directory)
-      (make-directory arche-diary-html-directory t))
+    (unless (file-directory-p html-dir)
+      (make-directory html-dir t))
     (let* ((months (arche-diary--find-or-list-month-files))
            (current (cons year month))
            (eligible (cl-remove-if
@@ -1083,7 +1104,7 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
                       months))
            (data (arche-diary--month-data path))
            (out (expand-file-name (format "%04d-%02d.html" year month)
-                                  arche-diary-html-directory)))
+                                  html-dir)))
       (with-temp-file out
         (insert (arche-diary--html-document
                  (format "%s — %04d-%02d"
@@ -1094,29 +1115,30 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
 
 (defun arche-diary--render-index-html ()
   "Render `index.html' embedding the most recent months.  Return its path."
-  (unless (file-directory-p arche-diary-html-directory)
-    (make-directory arche-diary-html-directory t))
-  (let* ((months (arche-diary--find-or-list-month-files))
-         (n (length months))
-         (recent-n (min arche-diary-html-index-recent-count n))
-         (recent (nthcdr (- n recent-n) months))
-         (older (butlast months recent-n))
-         (sections
-          (mapconcat
-           (lambda (entry)
-             (let* ((y (nth 0 entry))
-                    (m (nth 1 entry))
-                    (data (arche-diary--month-data (nth 2 entry))))
-               (arche-diary--month-section-html y m data)))
-           (reverse recent)
-           "\n<hr class=\"date-sep\">\n"))
-         (out (expand-file-name "index.html" arche-diary-html-directory)))
-    (with-temp-file out
-      (insert (arche-diary--html-document
-               arche-diary-html-page-title
-               (arche-diary--nav-html older nil)
-               sections)))
-    out))
+  (let ((html-dir (arche-diary--html-directory)))
+    (unless (file-directory-p html-dir)
+      (make-directory html-dir t))
+    (let* ((months (arche-diary--find-or-list-month-files))
+           (n (length months))
+           (recent-n (min arche-diary-html-index-recent-count n))
+           (recent (nthcdr (- n recent-n) months))
+           (older (butlast months recent-n))
+           (sections
+            (mapconcat
+             (lambda (entry)
+               (let* ((y (nth 0 entry))
+                      (m (nth 1 entry))
+                      (data (arche-diary--month-data (nth 2 entry))))
+                 (arche-diary--month-section-html y m data)))
+             (reverse recent)
+             "\n<hr class=\"date-sep\">\n"))
+           (out (expand-file-name "index.html" html-dir)))
+      (with-temp-file out
+        (insert (arche-diary--html-document
+                 arche-diary-html-page-title
+                 (arche-diary--nav-html older nil)
+                 sections)))
+      out)))
 
 ;;;###autoload
 (defun arche-diary-export-html (&optional month)
@@ -1140,7 +1162,7 @@ MONTH = `all', export every month."
       (arche-diary--render-month-html y m))))
   (arche-diary--render-index-html)
   (run-hooks 'arche-diary-after-export-hook)
-  (message "arche-diary: HTML written to %s" arche-diary-html-directory))
+  (message "arche-diary: HTML written to %s" (arche-diary--html-directory)))
 
 
 (provide 'arche-diary)

@@ -489,6 +489,51 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
           (should (string-match-p "#\\+NAME: fig:dup\n" s))
           (should (string-match-p "#\\+NAME: fig:dup-2\n" s)))))))
 
+(ert-deftest arche-diary-tests/directories-default-under-diary-dir ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-html-directory nil)
+          (arche-diary-image-directory nil)
+          (src (expand-file-name "z.png" tmpdir)))
+      (should (equal (arche-diary--html-directory)
+                     (expand-file-name "html" arche-diary-directory)))
+      (should (equal (arche-diary--image-directory)
+                     (expand-file-name "images" arche-diary-directory)))
+      (with-temp-file src (insert "Z"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (insert "** Pic\n")
+        (arche-diary-insert-image src)
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (should (file-exists-p
+               (expand-file-name "html/2026-05.html" arche-diary-directory)))
+      (should (file-exists-p
+               (expand-file-name "images/2026-05-15/z.png"
+                                 arche-diary-directory)))
+      (should (file-exists-p
+               (expand-file-name "html/images/2026-05-15/z.png"
+                                 arche-diary-directory))))))
+
+(ert-deftest arche-diary-tests/directories-explicit-override ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((alt (expand-file-name "alt-img" tmpdir))
+           (arche-diary-image-directory alt)
+           (src (expand-file-name "w.png" tmpdir)))
+      (should (equal (arche-diary--image-directory) alt))
+      (with-temp-file src (insert "W"))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (arche-diary-insert-image src)
+        (should (file-exists-p
+                 (expand-file-name "2026-05-15/w.png" alt)))
+        (should (string-match-p
+                 (regexp-quote
+                  (format "[[file:%s]]"
+                          (file-relative-name
+                           (expand-file-name "2026-05-15/w.png" alt)
+                           arche-diary-directory)))
+                 (buffer-string)))))))
+
 (defun arche-diary-tests--count (re s)
   "Return the number of non-overlapping matches of RE in S."
   (let ((n 0) (start 0))
