@@ -1073,7 +1073,11 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
      (mapconcat #'identity date-htmls "\n<hr class=\"date-sep\">\n"))))
 
 (defun arche-diary--html-document (title nav body)
-  "Wrap NAV and BODY in a complete HTML document with TITLE."
+  "Wrap NAV and BODY in a complete HTML document with TITLE.
+TITLE is used for the document `<title>' (browser tab).  The
+visible page heading at the top of the body is taken from
+`arche-diary-html-page-title' and emitted only when that is
+non-empty."
   (concat
    "<!DOCTYPE html>\n"
    (format "<html lang=\"%s\">\n"
@@ -1084,6 +1088,11 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
    (format "<title>%s</title>\n" (arche-diary--html-escape title))
    "<style>\n" arche-diary-html-css "\n</style>\n"
    "</head>\n<body>\n"
+   (if (and arche-diary-html-page-title
+            (not (string-empty-p arche-diary-html-page-title)))
+       (format "<header><h1>%s</h1></header>\n"
+               (arche-diary--html-escape arche-diary-html-page-title))
+     "")
    nav "\n"
    body "\n"
    "</body>\n</html>\n"))

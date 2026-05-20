@@ -368,6 +368,20 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should (< (string-match "<h3>Second" html)
                  (string-match "<h3>First" html))))))
 
+(ert-deftest arche-diary-tests/export-shows-page-title-on-body ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-fill-dates "2026-05-10" "2026-05-11")
+    (arche-diary-export-html '(2026 5))
+    (dolist (f '("2026-05.html" "index.html"))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name f arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p
+                 (format "<header><h1>%s</h1></header>"
+                         (regexp-quote arche-diary-html-page-title))
+                 html))))))
+
 (ert-deftest arche-diary-tests/export-all-writes-every-month ()
   (arche-diary-tests--with-dir 'plain
     (arche-diary-fill-dates "2026-04-25" "2026-05-02")
