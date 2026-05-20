@@ -121,9 +121,10 @@ nav ul { list-style:none; padding:0; margin:0 0 1rem 0;
          font-size:.9rem; color:var(--muted); }
 nav li { display:inline-block; margin-right:.5rem; }
 hr { border:0; border-top:1px solid #ddd; margin:1.5rem 0; }
-hr.note-sep { border-top:1px dashed #eee; margin:1rem 0; }
+hr.note-sep { border-top:1px dashed #eee; margin:.25rem 0; }
 article.date { margin-bottom:1rem; }
-section.note { margin:1rem 0; }
+section.note { margin:.25rem 0; }
+section.note h3 { margin:.25rem 0; }
 section.note p { margin:.5rem 0; }
 img { max-width:100%; height:auto; }
 .figure { margin:1rem 0; display:flow-root; }
