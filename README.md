@@ -164,6 +164,19 @@ outside `arche-diary-directory` and `arche-diary-image-link-type` is
 ugly in the buffer; such setups may prefer
 `(setq arche-diary-image-link-type 'absolute)`.
 
+## Deploying the exported HTML
+
+`arche-diary` deliberately ships no upload code; the export step just
+writes a self-contained folder under `arche-diary-html-directory`. To
+publish it on every export, hook `arche-diary-after-export-hook` to
+whatever transfer tool fits your host.
+
+A working sample lives in [`examples/upload-diary`](examples/upload-diary)
+— a small `lftp` script that mirrors the HTML folder to an FTPS host
+(credentials in `~/.netrc`, strict TLS verification on). See
+[`examples/README.md`](examples/README.md) for the quick-start and notes
+on adapting it to rsync-over-SSH or other targets.
+
 ## Running tests
 
 The package ships an ERT suite under `test/`. Run it with the included

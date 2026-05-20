@@ -1,0 +1,80 @@
+#!/bin/sh
+# upload-diary --- mirror arche-diary's HTML export to a host via FTPS
+#
+# A sample deploy script meant to be invoked from
+# `arche-diary-after-export-hook'.  Intentionally minimal:
+# `arche-diary' itself stays transport-agnostic, so transfer logic,
+# credentials, and TLS policy all live here.
+#
+# Requirements
+# ------------
+# - lftp           (apt install lftp, brew install lftp, ...)
+# - A working FTPS account on the host, ideally scoped to a single
+#   directory.  Use a long, random password.
+# - Credentials in ~/.netrc, mode 600:
+#       machine ftp.example.com
+#         login    mydiary
+#         password supersecretlongrandomstring
+#   `lftp' reads it automatically, so the password never lands in this
+#   script, the shell history, or `ps' output.
+#
+# Usage
+# -----
+#   DIARY_FTP_HOST=ftp.example.com \
+#   DIARY_FTP_REMOTE=/public_html/diary \
+#       ./upload-diary
+#
+# To wire it into Emacs, in your init (not in arche-diary.el):
+#
+#   (add-hook 'arche-diary-after-export-hook
+#             (lambda ()
+#               (let ((process-environment
+#                      (append '("DIARY_FTP_HOST=ftp.example.com"
+#                                "DIARY_FTP_REMOTE=/public_html/diary")
+#                              process-environment)))
+#                 (start-process "diary-upload" "*diary-upload*"
+#                                (expand-file-name "~/bin/upload-diary")))))
+#
+# `start-process' runs async, so Emacs doesn't block.  Watch progress
+# in the *diary-upload* buffer.
+#
+# Security notes
+# --------------
+# - `ftp:ssl-force true' refuses any non-TLS fallback -- no silent
+#   downgrade to plain FTP if the server misbehaves.
+# - `ssl:verify-certificate yes' and `ssl:check-hostname yes' actually
+#   authenticate the server.  Do NOT disable these; doing so turns FTPS
+#   into "encrypted but unauthenticated," which is barely better than
+#   plain FTP.  For a self-signed host, fetch the cert once and pin it
+#   with `set ssl:ca-file /path/to/ca.pem' instead of disabling checks.
+# - `--delete' makes the remote a strict mirror of LOCAL: if the local
+#   directory is empty or missing, the remote will be wiped.  Run with
+#   `--dry-run' the first time (see DIARY_MIRROR_FLAGS below).
+
+set -eu
+
+HOST="${DIARY_FTP_HOST:?set DIARY_FTP_HOST to your FTPS host}"
+REMOTE="${DIARY_FTP_REMOTE:?set DIARY_FTP_REMOTE to the path on the host}"
+LOCAL="${ARCHE_DIARY_HTML_DIR:-$HOME/diary/html}"
+
+# Override for safety / experimentation:
+#   DIARY_MIRROR_FLAGS="--dry-run --verbose --reverse --delete"
+MIRROR_FLAGS="${DIARY_MIRROR_FLAGS:---reverse --only-newer --delete --parallel=4 --verbose}"
+
+if [ ! -d "$LOCAL" ]; then
+    echo "upload-diary: local directory does not exist: $LOCAL" >&2
+    exit 1
+fi
+
+exec lftp -c "
+  set ftp:ssl-force              true
+  set ftp:ssl-protect-data       true
+  set ssl:verify-certificate     yes
+  set ssl:check-hostname         yes
+  set net:max-retries            3
+  set net:timeout                20
+  set net:reconnect-interval-base 5
+  open ${HOST}
+  mirror ${MIRROR_FLAGS} '${LOCAL}/' '${REMOTE}/'
+  bye
+"
