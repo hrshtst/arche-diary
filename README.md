@@ -13,6 +13,10 @@ organized one file per month, with a simple HTML export.
   in the order events happened.
 - Exported HTML reverses both axes: newest day at the top, newest note within
   each day at the top.
+- Each page's header title links to `index.html`. Below it, a compact nav
+  lists months as `YYYY.MM/MM ...` (grouped by year): a month page links every
+  *earlier* month (the current and future months are omitted); `index.html`
+  lists every month, the latest included.
 
 ## Requirements
 
@@ -136,7 +140,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-date-heading-regexp` | (see source) | Must capture the ISO date in group 1. |
 | `arche-diary-fill-dates-keep-buffers` | `start` | After a multi-month fill, keep only the `start` month's buffer (save + close the rest) or keep them `all`. |
 | `arche-diary-html-index-recent-count` | `2` | Months embedded directly in `index.html`. |
-| `arche-diary-html-page-title` | `"Diary"` | Base `<title>` for HTML pages. |
+| `arche-diary-html-page-title` | `"Diary"` | Base `<title>`, and the header heading (which links to `index.html`). |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
 | `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |

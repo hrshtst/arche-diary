@@ -422,7 +422,7 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                      (expand-file-name f arche-diary-html-directory))
                     (buffer-string))))
         (should (string-match-p
-                 (format "<header><h1>%s</h1></header>"
+                 (format "<header><h1><a href=\"index.html\">%s</a></h1></header>"
                          (regexp-quote arche-diary-html-page-title))
                  html))))))
 
@@ -437,20 +437,74 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
     (should (file-exists-p
              (expand-file-name "index.html" arche-diary-html-directory)))))
 
-(ert-deftest arche-diary-tests/export-nav-omits-future-months ()
+(ert-deftest arche-diary-tests/export-nav-lists-only-past-months ()
   (arche-diary-tests--with-dir 'plain
-    ;; Create files for Apr, May, Jun; export May only and check nav doesn't list Jun
-    (kill-buffer (arche-diary-open-month '(2026 4)))
-    (kill-buffer (arche-diary-open-month '(2026 5)))
-    (kill-buffer (arche-diary-open-month '(2026 6)))
+    ;; Create Apr, May, Jun; on the May page the nav lists only April —
+    ;; the current month and any future month are excluded.
+    (dolist (m '((2026 4) (2026 5) (2026 6)))
+      (kill-buffer (arche-diary-open-month m)))
     (arche-diary-export-html '(2026 5))
     (let ((html (with-temp-buffer
                   (insert-file-contents
                    (expand-file-name "2026-05.html"
                                      arche-diary-html-directory))
                   (buffer-string))))
-      (should (string-match-p "2026-04\\.html" html))
+      (should (string-match-p
+               "<nav>2026\\.<a href=\"2026-04.html\">04</a></nav>" html))
+      ;; current month (self) and future month are not linked in the nav
+      (should-not (string-match-p "2026-05\\.html" html))
       (should-not (string-match-p "2026-06\\.html" html)))))
+
+(ert-deftest arche-diary-tests/export-nav-groups-by-year ()
+  (arche-diary-tests--with-dir 'plain
+    (dolist (m '((2025 11) (2025 12) (2026 1) (2026 2)))
+      (kill-buffer (arche-diary-open-month m)))
+    ;; Display Feb 2026: past months span two years, grouped compactly.
+    (arche-diary-export-html '(2026 2))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-02.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p
+               (concat "<nav>"
+                       "2025\\.<a href=\"2025-11.html\">11</a>"
+                       "/<a href=\"2025-12.html\">12</a>"
+                       " "
+                       "2026\\.<a href=\"2026-01.html\">01</a>"
+                       "</nav>")
+               html)))))
+
+(ert-deftest arche-diary-tests/export-index-nav-lists-all-months ()
+  (arche-diary-tests--with-dir 'plain
+    (dolist (m '((2026 4) (2026 5) (2026 6)))
+      (kill-buffer (arche-diary-open-month m)))
+    (arche-diary-export-html '(2026 6))   ; also rebuilds index.html
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "index.html" arche-diary-html-directory))
+                  (buffer-string))))
+      ;; The index lists every month, the latest included.
+      (should (string-match-p
+               (concat "<nav>2026\\."
+                       "<a href=\"2026-04.html\">04</a>"
+                       "/<a href=\"2026-05.html\">05</a>"
+                       "/<a href=\"2026-06.html\">06</a></nav>")
+               html)))))
+
+(ert-deftest arche-diary-tests/export-title-links-to-index ()
+  (arche-diary-tests--with-dir 'plain
+    (kill-buffer (arche-diary-open-month '(2026 5)))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p
+               (format "<header><h1><a href=\"index.html\">%s</a></h1></header>"
+                       (regexp-quote arche-diary-html-page-title))
+               html)))))
 
 (ert-deftest arche-diary-tests/export-nil-exports-when-no-html ()
   (arche-diary-tests--with-dir 'plain

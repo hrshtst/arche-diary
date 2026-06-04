@@ -147,9 +147,8 @@ h2 { font-size:1.2rem; }
 h3 { font-size:1.0rem; color:var(--muted); }
 a { color:var(--link); text-decoration:none; }
 a:hover { text-decoration:underline; }
-nav ul { list-style:none; padding:0; margin:0 0 1rem 0;
-         font-size:.9rem; color:var(--muted); }
-nav li { display:inline-block; margin-right:.5rem; }
+nav { margin:0 0 1rem 0; font-size:.9rem; color:var(--muted);
+      line-height:1.8; word-break:break-all; }
 hr { border:0; border-top:1px solid #ddd; margin:1.5rem 0; }
 hr.note-sep { border-top:1px dashed #eee; margin:.25rem 0; }
 article.date { margin-bottom:1rem; }
@@ -1163,25 +1162,37 @@ outer list is also in document order (chronological)."
           (push (list iso display notes) results)))
       (nreverse results))))
 
-(defun arche-diary--nav-html (months &optional current)
-  "Build a <nav> with links to MONTHS (a list of (Y M PATH)).
-CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
-  (let ((items
-         (mapconcat
-          (lambda (entry)
-            (let* ((y (nth 0 entry))
-                   (m (nth 1 entry))
-                   (label (format "%04d-%02d" y m))
-                   (href (format "%04d-%02d.html" y m)))
-              (if (equal (cons y m) current)
-                  (format "<li><strong>%s</strong></li>" label)
-                (format "<li><a href=\"%s\">%s</a></li>" href label))))
-          months
-          "\n")))
-    (concat "<nav><ul>\n"
-            "<li><a href=\"index.html\">index</a></li>\n"
-            items
-            "\n</ul></nav>")))
+(defun arche-diary--nav-html (months)
+  "Build a <nav> of compact month links from MONTHS.
+MONTHS is a list of (YEAR MONTH ...) entries in ascending order.
+Each year is rendered as `YYYY.MM/MM/...' with every MM linking
+to its page, and the years are separated by spaces.  Returns the
+empty string when MONTHS is empty."
+  (if (null months)
+      ""
+    (let (groups)
+      ;; Bucket months by year, keeping ascending order within each.
+      (dolist (entry months)
+        (let ((y (nth 0 entry)) (m (nth 1 entry)))
+          (if (and groups (= (caar groups) y))
+              (setcdr (car groups) (cons m (cdar groups)))
+            (push (cons y (list m)) groups))))
+      (setq groups (nreverse groups))
+      (concat
+       "<nav>"
+       (mapconcat
+        (lambda (group)
+          (let ((y (car group)))
+            (concat
+             (format "%04d." y)
+             (mapconcat
+              (lambda (m)
+                (format "<a href=\"%04d-%02d.html\">%02d</a>" y m m))
+              (nreverse (cdr group))
+              "/"))))
+        groups
+        " ")
+       "</nav>"))))
 
 (defun arche-diary--month-section-html (year month data)
   "Render DATA into an HTML fragment for YEAR/MONTH (newest first)."
@@ -1215,8 +1226,8 @@ CURRENT, if non-nil, is a (Y . M) cons rendered as plain text."
   "Wrap NAV and BODY in a complete HTML document with TITLE.
 TITLE is used for the document `<title>' (browser tab).  The
 visible page heading at the top of the body is taken from
-`arche-diary-html-page-title' and emitted only when that is
-non-empty."
+`arche-diary-html-page-title', links to `index.html', and is
+emitted only when that is non-empty."
   (concat
    "<!DOCTYPE html>\n"
    (format "<html lang=\"%s\">\n"
@@ -1229,7 +1240,7 @@ non-empty."
    "</head>\n<body>\n"
    (if (and arche-diary-html-page-title
             (not (string-empty-p arche-diary-html-page-title)))
-       (format "<header><h1>%s</h1></header>\n"
+       (format "<header><h1><a href=\"index.html\">%s</a></h1></header>\n"
                (arche-diary--html-escape arche-diary-html-page-title))
      "")
    nav "\n"
@@ -1256,12 +1267,11 @@ strictly newer than it."
     (unless (file-directory-p html-dir)
       (make-directory html-dir t))
     (let* ((months (arche-diary--find-or-list-month-files))
-           (current (cons year month))
-           (eligible (cl-remove-if
-                      (lambda (e)
-                        (let ((ey (nth 0 e)) (em (nth 1 e)))
-                          (or (> ey year) (and (= ey year) (> em month)))))
-                      months))
+           (past (cl-remove-if-not
+                  (lambda (e)
+                    (let ((ey (nth 0 e)) (em (nth 1 e)))
+                      (or (< ey year) (and (= ey year) (< em month)))))
+                  months))
            (data (arche-diary--month-data path))
            (out (expand-file-name (format "%04d-%02d.html" year month)
                                   html-dir)))
@@ -1269,7 +1279,7 @@ strictly newer than it."
         (insert (arche-diary--html-document
                  (format "%s — %04d-%02d"
                          arche-diary-html-page-title year month)
-                 (arche-diary--nav-html eligible current)
+                 (arche-diary--nav-html past)
                  (arche-diary--month-section-html year month data))))
       out)))
 
@@ -1282,7 +1292,6 @@ strictly newer than it."
            (n (length months))
            (recent-n (min arche-diary-html-index-recent-count n))
            (recent (nthcdr (- n recent-n) months))
-           (older (butlast months recent-n))
            (sections
             (mapconcat
              (lambda (entry)
@@ -1296,7 +1305,7 @@ strictly newer than it."
       (with-temp-file out
         (insert (arche-diary--html-document
                  arche-diary-html-page-title
-                 (arche-diary--nav-html older nil)
+                 (arche-diary--nav-html months)
                  sections)))
       out)))
 
