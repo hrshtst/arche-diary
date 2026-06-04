@@ -19,6 +19,7 @@ organized one file per month, with a simple HTML export.
 - Emacs 28.1+
 - Org 9.5+
 - denote 3.0+ (hard dependency — required even when using the plain backend)
+- htmlize (optional — enables syntax-highlighted code blocks in HTML export)
 
 ## Install
 

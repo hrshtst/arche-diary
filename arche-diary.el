@@ -5,6 +5,7 @@
 ;; Author: Hiroshi Atsuta <atsuta.hiroshi@gmail.com>
 ;; Version: 0.1.0
 ;; Package-Requires: ((emacs "28.1") (org "9.5") (denote "3.0"))
+;; Optional: htmlize (syntax-highlighted code blocks in HTML export)
 ;; Keywords: convenience, calendar
 ;; URL: https://github.com/hrshtst/arche-diary
 
@@ -24,6 +25,7 @@
 (require 'parse-time)
 (require 'seq)
 (require 'subr-x)
+(require 'htmlize nil t)
 
 
 ;;; Customization
@@ -978,6 +980,7 @@ rewritten so the exported page can resolve them."
          (org-export-with-author nil)
          (org-export-with-creator nil)
          (org-export-with-title nil)
+         (org-html-htmlize-output-type (if (featurep 'htmlize) 'inline-css nil))
          (str (arche-diary--rewrite-image-links-for-export str)))
     (string-trim (or (org-export-string-as str 'html t) ""))))
 
