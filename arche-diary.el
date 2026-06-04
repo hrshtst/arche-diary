@@ -122,6 +122,20 @@ Either way, buffers the user already had open are never killed."
   :group 'arche-diary
   :type 'string)
 
+(defcustom arche-diary-html-unfill-cjk t
+  "When non-nil, join hard-wrapped CJK lines during HTML export.
+Diary source kept under a small `fill-column' wraps long CJK
+paragraphs across several lines.  Org's HTML export turns each
+in-paragraph newline into a space, which is visible and wrong in
+scripts such as Japanese or Chinese that have no inter-word
+spaces.  With this enabled, a line break is dropped on export
+whenever a CJK character sits on either side of it; a break
+between two non-CJK words still becomes a single space, and code
+blocks are left untouched.  The Org files themselves are never
+modified."
+  :group 'arche-diary
+  :type 'boolean)
+
 (defcustom arche-diary-html-css "\
 :root { --fg:#222; --bg:#fff; --muted:#888; --link:#366; }
 body { margin:2rem auto; max-width:40rem; padding:0 1rem;
@@ -1002,9 +1016,96 @@ self-contained."
          m)))
    str t t))
 
+(defconst arche-diary--cjk-regexp
+  "[　-〿぀-ヿ㐀-䶿一-鿿＀-￯]"
+  "Regexp matching one CJK character.
+Covers CJK symbols and punctuation, hiragana, katakana, the CJK
+Unified Ideographs (plus extension A), and halfwidth/fullwidth
+forms.")
+
+(defconst arche-diary--unfill-block-begin-re "^[ \t]*#\\+begin_"
+  "Regexp matching the opening line of an Org block.")
+
+(defconst arche-diary--unfill-block-end-re "^[ \t]*#\\+end_"
+  "Regexp matching the closing line of an Org block.")
+
+(defconst arche-diary--unfill-element-start-re
+  (concat "^\\(?:"
+          "[ \t]*$"                     ; blank line
+          "\\|[ \t]*[-+*][ \t]"         ; unordered list item
+          "\\|[ \t]*[0-9]+[.)][ \t]"    ; ordered list item
+          "\\|[ \t]*-\\{5,\\}[ \t]*$"   ; horizontal rule
+          "\\|[ \t]*#"                  ; keyword / comment / block
+          "\\|[ \t]*|"                  ; table row
+          "\\|[ \t]*:"                  ; drawer or fixed-width line
+          "\\|\\*+[ \t]"                ; heading
+          "\\|\\[fn:"                   ; footnote definition
+          "\\)")
+  "Regexp matching a line that begins a new Org element.
+Such a line is never folded onto the preceding one.")
+
+(defconst arche-diary--unfill-non-appendable-re
+  (concat "^\\(?:"
+          "[ \t]*$"                     ; blank line
+          "\\|[ \t]*-\\{5,\\}[ \t]*$"   ; horizontal rule
+          "\\|[ \t]*#"                  ; keyword / comment / block
+          "\\|[ \t]*|"                  ; table row
+          "\\|[ \t]*:"                  ; drawer or fixed-width line
+          "\\|\\*+[ \t]"                ; heading
+          "\\)")
+  "Regexp matching a line that cannot absorb a following continuation.
+List items are absent on purpose: their wrapped continuation lines
+should fold back onto the bullet.")
+
+(defun arche-diary--cjk-head-p (s)
+  "Return non-nil if the first non-blank character of S is CJK."
+  (let ((s (string-trim-left s)))
+    (and (> (length s) 0)
+         (string-match-p arche-diary--cjk-regexp (substring s 0 1)))))
+
+(defun arche-diary--cjk-tail-p (s)
+  "Return non-nil if the last non-blank character of S is CJK."
+  (let ((s (string-trim-right s)))
+    (and (> (length s) 0)
+         (string-match-p arche-diary--cjk-regexp (substring s -1)))))
+
+(defun arche-diary--unfill-cjk (str)
+  "Join hard-wrapped lines in STR for CJK-friendly HTML export.
+Within a paragraph or list item, a line break is dropped entirely
+when a CJK character is on either side of it (CJK text has no
+inter-word spaces, so the break would otherwise render as a stray
+space); a break between two non-CJK words becomes a single space,
+matching how a browser would render the newline.  Blank lines,
+headings, lists, tables, keywords and `#+begin_..#+end_' blocks
+keep their own lines."
+  (let ((acc nil)
+        (in-block nil))
+    (dolist (line (split-string str "\n"))
+      (cond
+       (in-block
+        (push line acc)
+        (when (string-match-p arche-diary--unfill-block-end-re line)
+          (setq in-block nil)))
+       ((string-match-p arche-diary--unfill-block-begin-re line)
+        (setq in-block t)
+        (push line acc))
+       ((and acc
+             (not (string-match-p arche-diary--unfill-non-appendable-re
+                                  (car acc)))
+             (not (string-match-p arche-diary--unfill-element-start-re line)))
+        (let* ((prev (string-trim-right (car acc)))
+               (cont (string-trim-left line))
+               (sep (if (or (arche-diary--cjk-tail-p prev)
+                            (arche-diary--cjk-head-p cont))
+                        "" " ")))
+          (setcar acc (concat prev sep cont))))
+       (t (push line acc))))
+    (mapconcat #'identity (nreverse acc) "\n")))
+
 (defun arche-diary--org-string-to-html (str)
   "Render Org-formatted STR to an HTML fragment (body only).
-Image file links are copied into the html directory and
+Hard-wrapped CJK lines are folded (see `arche-diary-html-unfill-cjk'),
+and image file links are copied into the html directory and
 rewritten so the exported page can resolve them."
   (let* ((org-export-with-toc nil)
          (org-export-with-section-numbers nil)
@@ -1013,7 +1114,10 @@ rewritten so the exported page can resolve them."
          (org-export-with-creator nil)
          (org-export-with-title nil)
          (org-html-htmlize-output-type (if (featurep 'htmlize) 'inline-css nil))
-         (str (arche-diary--rewrite-image-links-for-export str)))
+         (str (arche-diary--rewrite-image-links-for-export
+               (if arche-diary-html-unfill-cjk
+                   (arche-diary--unfill-cjk str)
+                 str))))
     (string-trim (or (org-export-string-as str 'html t) ""))))
 
 (defun arche-diary--collect-notes-after-point (bound)

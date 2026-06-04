@@ -138,6 +138,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-html-index-recent-count` | `2` | Months embedded directly in `index.html`. |
 | `arche-diary-html-page-title` | `"Diary"` | Base `<title>` for HTML pages. |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
+| `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
 | `arche-diary-after-export-hook` | nil | Run after a successful export. |
@@ -165,6 +166,19 @@ outside `arche-diary-directory` and `arche-diary-image-link-type` is
 `relative` (the default), inserted links become `../…` paths — correct, but
 ugly in the buffer; such setups may prefer
 `(setq arche-diary-image-link-type 'absolute)`.
+
+### CJK paragraphs and `fill-column`
+
+If you hard-wrap notes at a small `fill-column` (common for Japanese,
+Chinese, etc.), each in-paragraph newline would otherwise export as a
+visible space — wrong for scripts with no inter-word spaces. With
+`arche-diary-html-unfill-cjk` (on by default) the exporter folds those
+wrapped lines back together: a break is dropped wherever a CJK character
+sits on either side of it, while a break between two non-CJK words still
+becomes a single space and `#+begin_…` blocks are left verbatim. Only the
+exported HTML is affected; your Org files keep their wrapping. The whole
+thing is a no-op for diaries with no CJK text — set it to nil to turn it
+off entirely.
 
 ## Deploying the exported HTML
 

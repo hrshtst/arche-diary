@@ -519,6 +519,66 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
     (should (file-exists-p
              (expand-file-name "2026-05.html" arche-diary-html-directory)))))
 
+;;;; CJK line unfill
+
+(ert-deftest arche-diary-tests/unfill-cjk-joins-cjk-break ()
+  (should (equal (arche-diary--unfill-cjk "リハビリ\nがてら日記を書いた。")
+                 "リハビリがてら日記を書いた。")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-keeps-ascii-space ()
+  ;; A break between two non-CJK words becomes one space, exactly as a
+  ;; browser would have rendered the newline.
+  (should (equal (arche-diary--unfill-cjk "the quick\nbrown fox")
+                 "the quick brown fox")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-drops-space-at-link-boundary ()
+  (should (equal (arche-diary--unfill-cjk
+                  "話をしたら\n[[http://x][近くのイベント]]で蔵の人が")
+                 "話をしたら[[http://x][近くのイベント]]で蔵の人が")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-preserves-paragraph-break ()
+  (should (equal (arche-diary--unfill-cjk "あいう\n\nえお")
+                 "あいう\n\nえお")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-folds-list-continuation ()
+  ;; A wrapped continuation folds onto its bullet; a new bullet does not.
+  (should (equal (arche-diary--unfill-cjk
+                  "- 起き上がる\n  ことができる\n- 次の項目")
+                 "- 起き上がることができる\n- 次の項目")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-leaves-blocks-untouched ()
+  (should (equal (arche-diary--unfill-cjk
+                  "前置き\n#+begin_src sh\nあ\nい\n#+end_src\n後ろ")
+                 "前置き\n#+begin_src sh\nあ\nい\n#+end_src\n後ろ")))
+
+(ert-deftest arche-diary-tests/export-unfills-cjk-lines ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (arche-diary-add-date "15")
+      (insert "** メモ\nリハビリ\nがてら日記を書いた。\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html" arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "リハビリがてら日記を書いた。" html))
+      (should-not (string-match-p "リハビリ\nがてら" html)))))
+
+(ert-deftest arche-diary-tests/export-unfill-cjk-can-be-disabled ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-html-unfill-cjk nil))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (insert "** メモ\nリハビリ\nがてら日記を書いた。\n")
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html" arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p "リハビリ\nがてら" html))))))
+
 ;;;; insert-image
 
 (ert-deftest arche-diary-tests/insert-image-copies-and-links ()
