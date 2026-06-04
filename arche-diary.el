@@ -790,7 +790,10 @@ before today."
 END defaults to today.  START defaults to the day after the
 latest existing date across all months, or END when no dates
 exist anywhere.  Creates monthly files as needed.  With a prefix
-argument, prompt for both bounds."
+argument, prompt for both bounds.
+
+The monthly buffers touched are left open, and point is moved to
+the START date's heading in its buffer."
   (interactive
    (when current-prefix-arg
      (list (let ((s (read-from-minibuffer "Start (blank = latest+1): ")))
@@ -810,20 +813,24 @@ argument, prompt for both bounds."
                   (arche-diary--time-to-iso start-time)
                   (arche-diary--time-to-iso end-time)))
     (let ((cur start-time)
-          (count 0))
+          (count 0)
+          (start-iso (arche-diary--time-to-iso start-time))
+          start-buf)
       (while (not (time-less-p end-time cur))
         (let* ((ym (arche-diary--time-to-month cur))
                (path (arche-diary--ensure-monthly-file (car ym) (cdr ym)))
-               (existing-buf (get-file-buffer path))
-               (buf (or existing-buf (find-file-noselect path))))
+               (buf (or (get-file-buffer path) (find-file-noselect path))))
           (with-current-buffer buf
             (arche-diary--insert-date-heading cur)
             (save-buffer))
-          (unless existing-buf (kill-buffer buf)))
+          (unless start-buf (setq start-buf buf)))
         (cl-incf count)
         (setq cur (encode-time
                    (decoded-time-add (decode-time cur)
                                      (make-decoded-time :day 1)))))
+      (when start-buf
+        (pop-to-buffer-same-window start-buf)
+        (arche-diary--goto-date-heading start-iso))
       (message "arche-diary: added %d date(s)" count))))
 
 ;;;###autoload

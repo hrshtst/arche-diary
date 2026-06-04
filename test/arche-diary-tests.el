@@ -318,6 +318,30 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                      '("2026-05-10" "2026-05-11"
                        "2026-05-12" "2026-05-13"))))))
 
+(ert-deftest arche-diary-tests/fill-dates-leaves-buffer-and-point ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-fill-dates "2026-05-10" "2026-05-13")
+    (let ((buf (get-file-buffer
+                (expand-file-name "2026-05.org" arche-diary-directory))))
+      ;; The start month's buffer stays alive and current.
+      (should (buffer-live-p buf))
+      (should (eq (current-buffer) buf))
+      ;; Point sits on the START date's heading.
+      (should (looking-at-p "^\\* 2026-05-10")))))
+
+(ert-deftest arche-diary-tests/fill-dates-point-in-start-month-buffer ()
+  (arche-diary-tests--with-dir 'plain
+    ;; START is in April, so point lands in the April buffer.
+    (arche-diary-fill-dates "2026-04-29" "2026-05-02")
+    (let ((apr (get-file-buffer
+                (expand-file-name "2026-04.org" arche-diary-directory)))
+          (may (get-file-buffer
+                (expand-file-name "2026-05.org" arche-diary-directory))))
+      (should (buffer-live-p apr))
+      (should (buffer-live-p may))
+      (should (eq (current-buffer) apr))
+      (should (looking-at-p "^\\* 2026-04-29")))))
+
 
 ;;;; HTML export
 
