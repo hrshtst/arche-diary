@@ -93,6 +93,20 @@ Group 1 must capture the ISO date (YYYY-MM-DD)."
   :group 'arche-diary
   :type 'regexp)
 
+(defcustom arche-diary-fill-dates-keep-buffers 'start
+  "Which monthly buffers `arche-diary-fill-dates' leaves open.
+When a range spans several months the command opens a buffer per
+month.  This controls which of those it keeps afterwards:
+
+  `start'  Keep only the START month's buffer (the one point lands
+           in); save and kill the other months it opened.
+  `all'    Keep every monthly buffer it opened.
+
+Either way, buffers the user already had open are never killed."
+  :group 'arche-diary
+  :type '(choice (const :tag "Only the start month" start)
+                 (const :tag "Every touched month" all)))
+
 (defcustom arche-diary-html-index-recent-count 2
   "Number of recent months embedded directly in `index.html'."
   :group 'arche-diary
@@ -792,8 +806,10 @@ latest existing date across all months, or END when no dates
 exist anywhere.  Creates monthly files as needed.  With a prefix
 argument, prompt for both bounds.
 
-The monthly buffers touched are left open, and point is moved to
-the START date's heading in its buffer."
+Point is moved to the START date's heading and its buffer shown.
+`arche-diary-fill-dates-keep-buffers' decides whether the other
+months opened along the way are kept or saved and closed; buffers
+the user already had open are never closed."
   (interactive
    (when current-prefix-arg
      (list (let ((s (read-from-minibuffer "Start (blank = latest+1): ")))
@@ -815,7 +831,9 @@ the START date's heading in its buffer."
     (let ((cur start-time)
           (count 0)
           (start-iso (arche-diary--time-to-iso start-time))
-          start-buf)
+          (pre-buffers (cl-remove-if-not #'buffer-file-name (buffer-list)))
+          start-buf
+          touched)
       (while (not (time-less-p end-time cur))
         (let* ((ym (arche-diary--time-to-month cur))
                (path (arche-diary--ensure-monthly-file (car ym) (cdr ym)))
@@ -823,11 +841,18 @@ the START date's heading in its buffer."
           (with-current-buffer buf
             (arche-diary--insert-date-heading cur)
             (save-buffer))
+          (cl-pushnew buf touched)
           (unless start-buf (setq start-buf buf)))
         (cl-incf count)
         (setq cur (encode-time
                    (decoded-time-add (decode-time cur)
                                      (make-decoded-time :day 1)))))
+      ;; Close the scratch buffers we opened (saved above), keeping the
+      ;; start month and anything the user already had open.
+      (when (eq arche-diary-fill-dates-keep-buffers 'start)
+        (dolist (buf touched)
+          (unless (or (eq buf start-buf) (memq buf pre-buffers))
+            (kill-buffer buf))))
       (when start-buf
         (pop-to-buffer-same-window start-buf)
         (arche-diary--goto-date-heading start-iso))

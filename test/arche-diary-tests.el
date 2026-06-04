@@ -329,18 +329,38 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       ;; Point sits on the START date's heading.
       (should (looking-at-p "^\\* 2026-05-10")))))
 
-(ert-deftest arche-diary-tests/fill-dates-point-in-start-month-buffer ()
+(ert-deftest arche-diary-tests/fill-dates-keep-start-closes-other-months ()
   (arche-diary-tests--with-dir 'plain
-    ;; START is in April, so point lands in the April buffer.
-    (arche-diary-fill-dates "2026-04-29" "2026-05-02")
-    (let ((apr (get-file-buffer
-                (expand-file-name "2026-04.org" arche-diary-directory)))
-          (may (get-file-buffer
-                (expand-file-name "2026-05.org" arche-diary-directory))))
-      (should (buffer-live-p apr))
-      (should (buffer-live-p may))
-      (should (eq (current-buffer) apr))
-      (should (looking-at-p "^\\* 2026-04-29")))))
+    (let ((arche-diary-fill-dates-keep-buffers 'start))
+      ;; START is in April, so point lands in the April buffer; May was
+      ;; opened only as scratch and is saved + closed.
+      (arche-diary-fill-dates "2026-04-29" "2026-05-02")
+      (should (eq (current-buffer)
+                  (get-file-buffer
+                   (expand-file-name "2026-04.org" arche-diary-directory))))
+      (should (looking-at-p "^\\* 2026-04-29"))
+      (should-not (get-file-buffer
+                   (expand-file-name "2026-05.org" arche-diary-directory))))))
+
+(ert-deftest arche-diary-tests/fill-dates-keep-all-keeps-every-month ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-fill-dates-keep-buffers 'all))
+      (arche-diary-fill-dates "2026-04-29" "2026-05-02")
+      (should (buffer-live-p
+               (get-file-buffer
+                (expand-file-name "2026-04.org" arche-diary-directory))))
+      (should (buffer-live-p
+               (get-file-buffer
+                (expand-file-name "2026-05.org" arche-diary-directory)))))))
+
+(ert-deftest arche-diary-tests/fill-dates-keeps-preexisting-buffers ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-fill-dates-keep-buffers 'start)
+          ;; User already has the May buffer open before filling.
+          (may (arche-diary-open-month '(2026 5))))
+      (arche-diary-fill-dates "2026-04-29" "2026-05-02")
+      ;; Even though May is not the start month, it is left alone.
+      (should (buffer-live-p may)))))
 
 
 ;;;; HTML export

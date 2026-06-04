@@ -134,6 +134,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-denote-file-type` | `org` | File type passed to `denote`. |
 | `arche-diary-date-heading-format` | `"%Y-%m-%d %A"` | Date heading line format. |
 | `arche-diary-date-heading-regexp` | (see source) | Must capture the ISO date in group 1. |
+| `arche-diary-fill-dates-keep-buffers` | `start` | After a multi-month fill, keep only the `start` month's buffer (save + close the rest) or keep them `all`. |
 | `arche-diary-html-index-recent-count` | `2` | Months embedded directly in `index.html`. |
 | `arche-diary-html-page-title` | `"Diary"` | Base `<title>` for HTML pages. |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
