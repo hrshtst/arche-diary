@@ -39,7 +39,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-visit-date` | Open the appropriate month and put point at a date heading (creating both if missing). |
 | `arche-diary-fill-dates` | Insert headings for every day in a range. |
 | `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
-| `arche-diary-export-html`| Export one month (or all) to HTML and rebuild `index.html`. |
+| `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. |
 
 ### Accepted argument formats
 
@@ -171,7 +171,9 @@ ugly in the buffer; such setups may prefer
 `arche-diary` deliberately ships no upload code; the export step just
 writes a self-contained folder under `arche-diary-html-directory`. To
 publish it on every export, hook `arche-diary-after-export-hook` to
-whatever transfer tool fits your host.
+whatever transfer tool fits your host. The hook runs whenever a month
+was actually exported; a no-argument export that finds everything
+already up to date is a no-op and does not fire it.
 
 A working sample lives in [`examples/upload-diary`](examples/upload-diary)
 — a small `lftp` script that mirrors the HTML folder to an FTPS host

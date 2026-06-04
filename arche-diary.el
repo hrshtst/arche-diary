@@ -1132,6 +1132,17 @@ non-empty."
    body "\n"
    "</body>\n</html>\n"))
 
+(defun arche-diary--month-html-stale-p (year month source-path)
+  "Return non-nil if YEAR/MONTH's exported HTML is missing or out of date.
+HTML is out of date when it does not exist, or when SOURCE-PATH is
+strictly newer than it."
+  (let ((html (expand-file-name (format "%04d-%02d.html" year month)
+                                (arche-diary--html-directory))))
+    (or (not (file-exists-p html))
+        (time-less-p
+         (file-attribute-modification-time (file-attributes html))
+         (file-attribute-modification-time (file-attributes source-path))))))
+
 (defun arche-diary--render-month-html (year month)
   "Render `YYYY-MM.html' for YEAR/MONTH.  Return the output path."
   (let ((path (arche-diary--month-file year month))
@@ -1187,10 +1198,18 @@ non-empty."
 
 ;;;###autoload
 (defun arche-diary-export-html (&optional month)
-  "Export the monthly diary for MONTH to HTML and rebuild `index.html'.
-With a prefix argument, prompt for MONTH.  With a double prefix
-argument \(\\[universal-argument] \\[universal-argument]) or
-MONTH = `all', export every month."
+  "Export the monthly diary to HTML and rebuild `index.html'.
+
+With no argument, export every month whose HTML is out of date —
+missing, or older than its source Org file — and leave the rest
+untouched.  When everything is already current this is a no-op:
+neither `index.html' nor `arche-diary-after-export-hook' runs.
+
+With a prefix argument, prompt for MONTH and force-export it.
+With a double prefix argument \(\\[universal-argument]
+\\[universal-argument]) or MONTH = `all', force-export every
+month.  Any explicit MONTH (including `all') always rebuilds
+`index.html' and runs `arche-diary-after-export-hook'."
   (interactive
    (cond
     ((equal current-prefix-arg '(16)) (list 'all))
@@ -1198,16 +1217,35 @@ MONTH = `all', export every month."
      (list (let ((s (read-from-minibuffer "Month: ")))
              (and (not (string-empty-p s)) s))))
     (t (list nil))))
-  (cond
-   ((eq month 'all)
-    (dolist (entry (arche-diary--find-or-list-month-files))
-      (arche-diary--render-month-html (nth 0 entry) (nth 1 entry))))
-   (t
-    (pcase-let ((`(,y . ,m) (arche-diary--parse-month month)))
-      (arche-diary--render-month-html y m))))
-  (arche-diary--render-index-html)
-  (run-hooks 'arche-diary-after-export-hook)
-  (message "arche-diary: HTML written to %s" (arche-diary--html-directory)))
+  (cl-flet ((finish (&optional count)
+              (arche-diary--render-index-html)
+              (run-hooks 'arche-diary-after-export-hook)
+              (if count
+                  (message
+                   "arche-diary: exported %d month(s); HTML written to %s"
+                   count (arche-diary--html-directory))
+                (message "arche-diary: HTML written to %s"
+                         (arche-diary--html-directory)))))
+    (cond
+     ((eq month 'all)
+      (dolist (entry (arche-diary--find-or-list-month-files))
+        (arche-diary--render-month-html (nth 0 entry) (nth 1 entry)))
+      (finish))
+     ((null month)
+      (let ((stale (cl-remove-if-not
+                    (lambda (e)
+                      (arche-diary--month-html-stale-p
+                       (nth 0 e) (nth 1 e) (nth 2 e)))
+                    (arche-diary--find-or-list-month-files))))
+        (if (null stale)
+            (message "arche-diary: HTML already up to date")
+          (dolist (e stale)
+            (arche-diary--render-month-html (nth 0 e) (nth 1 e)))
+          (finish (length stale)))))
+     (t
+      (pcase-let ((`(,y . ,m) (arche-diary--parse-month month)))
+        (arche-diary--render-month-html y m))
+      (finish)))))
 
 
 (provide 'arche-diary)

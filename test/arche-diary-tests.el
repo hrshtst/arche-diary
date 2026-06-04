@@ -452,6 +452,73 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should (string-match-p "2026-04\\.html" html))
       (should-not (string-match-p "2026-06\\.html" html)))))
 
+(ert-deftest arche-diary-tests/export-nil-exports-when-no-html ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-fill-dates "2026-04-25" "2026-05-02")
+    ;; No HTML yet, so a no-arg export should render every stale month.
+    (arche-diary-export-html)
+    (should (file-exists-p
+             (expand-file-name "2026-04.html" arche-diary-html-directory)))
+    (should (file-exists-p
+             (expand-file-name "2026-05.html" arche-diary-html-directory)))
+    (should (file-exists-p
+             (expand-file-name "index.html" arche-diary-html-directory)))))
+
+(ert-deftest arche-diary-tests/export-nil-noop-when-current ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((old (encode-time 0 0 0 1 1 2000))
+          (new (encode-time 0 0 0 1 1 2030)))
+      (arche-diary-fill-dates "2026-05-10" "2026-05-12")
+      (arche-diary-export-html '(2026 5))
+      ;; Force the source older than its HTML so nothing is stale.
+      (let ((src (expand-file-name "2026-05.org" arche-diary-directory))
+            (html (expand-file-name "2026-05.html" arche-diary-html-directory))
+            (index (expand-file-name "index.html" arche-diary-html-directory)))
+        (set-file-times src old)
+        (set-file-times html new)
+        (set-file-times index new)
+        (arche-diary-export-html)       ; nil -> no-op
+        ;; Neither the month page nor the index was rewritten.
+        (should (time-equal-p new (file-attribute-modification-time
+                                   (file-attributes html))))
+        (should (time-equal-p new (file-attribute-modification-time
+                                   (file-attributes index))))))))
+
+(ert-deftest arche-diary-tests/export-nil-only-stale-month ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((old (encode-time 0 0 0 1 1 2000))
+          (new (encode-time 0 0 0 1 1 2030)))
+      (arche-diary-fill-dates "2026-04-25" "2026-05-02")
+      (arche-diary-export-html 'all)
+      (let ((apr-src (expand-file-name "2026-04.org" arche-diary-directory))
+            (apr-html (expand-file-name "2026-04.html"
+                                        arche-diary-html-directory))
+            (may-src (expand-file-name "2026-05.org" arche-diary-directory))
+            (may-html (expand-file-name "2026-05.html"
+                                        arche-diary-html-directory)))
+        ;; April: source newer than its HTML -> stale.
+        (set-file-times apr-html old)
+        (set-file-times apr-src new)
+        ;; May: source older than its HTML -> current.
+        (set-file-times may-src old)
+        (set-file-times may-html new)
+        (arche-diary-export-html)
+        ;; April was re-rendered; May was left untouched.
+        (should-not (time-equal-p old (file-attribute-modification-time
+                                       (file-attributes apr-html))))
+        (should (time-equal-p new (file-attribute-modification-time
+                                   (file-attributes may-html))))))))
+
+(ert-deftest arche-diary-tests/export-nil-exports-new-month ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-fill-dates "2026-04-25" "2026-04-27")
+    (arche-diary-export-html '(2026 4))
+    ;; A second month appears with no HTML of its own yet.
+    (arche-diary-fill-dates "2026-05-01" "2026-05-02")
+    (arche-diary-export-html)
+    (should (file-exists-p
+             (expand-file-name "2026-05.html" arche-diary-html-directory)))))
+
 ;;;; insert-image
 
 (ert-deftest arche-diary-tests/insert-image-copies-and-links ()
