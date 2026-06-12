@@ -939,6 +939,103 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should-not (string-match-p "Secret part" html))
       (should-not (string-match-p "hidden detail" html)))))
 
+(ert-deftest arche-diary-tests/export-renders-header-links ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (goto-char (point-max))
+      (insert "* Links\n"
+              "- [[https://conf.example.com][ConfX]]\n"
+              "- [[https://journal.example.com/login][Journal login]]\n")
+      (arche-diary-add-date "15")
+      (insert "** Note\nbody.\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "<nav class=\"links\">" html))
+      (should (string-match-p
+               "<a href=\"https://conf.example.com\">ConfX</a>" html))
+      (should (string-match-p
+               "<a href=\"https://journal.example.com/login\">Journal login</a>"
+               html))
+      ;; ConfX comes before Journal login (document order).
+      (should (< (string-match "ConfX" html)
+                 (string-match "Journal login" html)))
+      ;; The links heading is not exported as a date section.
+      (should-not (string-match-p "<h2>Links" html)))))
+
+(ert-deftest arche-diary-tests/index-shows-latest-month-links ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (goto-char (point-max))
+      (insert "* Links\n- [[https://may.example.com][MayLink]]\n")
+      (arche-diary-add-date "15")
+      (insert "** N\nb.\n")
+      (save-buffer))
+    (with-current-buffer (arche-diary-open-month '(2026 6))
+      ;; June inherits May's links on creation; give it its own instead.
+      (goto-char (point-min))
+      (while (re-search-forward "[Mm]ay" nil t)
+        (replace-match (if (equal (match-string 0) "May") "June" "june") t t))
+      (arche-diary-add-date "3")
+      (insert "** N\nb.\n")
+      (save-buffer))
+    (arche-diary-export-html 'all)
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "index.html" arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p
+               "<a href=\"https://june.example.com\">JuneLink</a>" html))
+      (should-not (string-match-p "MayLink" html))
+      (should-not (string-match-p "may.example.com" html)))))
+
+(ert-deftest arche-diary-tests/new-month-inherits-links ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (goto-char (point-max))
+      (insert "* Links\n"
+              "- [[https://conf.example.com][ConfX]]\n"
+              "- [[https://journal.example.com/login][Journal login]]\n")
+      (save-buffer))
+    (let* ((june (arche-diary--ensure-monthly-file 2026 6))
+           (content (with-temp-buffer
+                      (insert-file-contents june)
+                      (buffer-string))))
+      (should (string-match-p "^\\* Links$" content))
+      (should (string-match-p
+               "\\[\\[https://conf.example.com\\]\\[ConfX\\]\\]" content))
+      (should (string-match-p "Journal login" content))
+      ;; The inherited subtree sits above any date heading.
+      (should (or (null (string-match arche-diary-date-heading-regexp content))
+                  (< (string-match "^\\* Links$" content)
+                     (string-match arche-diary-date-heading-regexp content)))))))
+
+(ert-deftest arche-diary-tests/links-disabled-no-inherit-no-render ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-links-heading nil))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (goto-char (point-max))
+        (insert "* Links\n- [[https://conf.example.com][ConfX]]\n")
+        (arche-diary-add-date "15")
+        (insert "** N\nb.\n")
+        (save-buffer))
+      (let ((june (arche-diary--ensure-monthly-file 2026 6)))
+        (should-not (string-match-p
+                     "Links"
+                     (with-temp-buffer (insert-file-contents june)
+                                       (buffer-string)))))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html"
+                                       arche-diary-html-directory))
+                    (buffer-string))))
+        (should-not (string-match-p "nav class=\"links\"" html))))))
+
 (provide 'arche-diary-tests)
 
 ;;; arche-diary-tests.el ends here

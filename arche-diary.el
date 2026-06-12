@@ -93,6 +93,25 @@ Group 1 must capture the ISO date (YYYY-MM-DD)."
   :group 'arche-diary
   :type 'regexp)
 
+(defcustom arche-diary-links-heading "Links"
+  "Text of the level-1 heading holding the month's useful links.
+Keep this heading at the top of each monthly file, above the date
+headings, with the links written as an ordinary Org list beneath
+it, e.g.
+
+  * Links
+  - [[https://example.com][Some conference]]
+  - [[https://journal.example.com/login][Journal login]]
+
+The links are rendered into the page header on HTML export (each
+month page shows its own links; `index.html' shows the latest
+month's), and the whole subtree is carried over verbatim when a
+new monthly file is created.  Because it is not a date heading it
+is otherwise ignored by parsing and export.  Set to nil to
+disable the feature entirely."
+  :group 'arche-diary
+  :type '(choice (const :tag "Disabled" nil) string))
+
 (defcustom arche-diary-fill-dates-keep-buffers 'start
   "Which monthly buffers `arche-diary-fill-dates' leaves open.
 When a range spans several months the command opens a buffer per
@@ -161,6 +180,9 @@ a { color:var(--link); text-decoration:none; }
 a:hover { text-decoration:underline; }
 nav { margin:0 0 1rem 0; font-size:.9rem; color:var(--muted);
       line-height:1.8; word-break:break-all; }
+nav.links { display:flex; flex-wrap:wrap; gap:.2rem 1rem;
+            margin:.25rem 0 1rem 0; }
+nav.links a { color:var(--link); }
 hr { border:0; border-top:1px solid #ddd; margin:1.5rem 0; }
 hr.note-sep { border-top:1px dashed #eee; margin:.25rem 0; }
 article.date { margin-bottom:1rem; }
@@ -566,14 +588,105 @@ Sorted in ascending chronological order."
         (arche-diary--month-file year month)
         (error "Failed to create denote file for %04d-%02d" year month))))
 
+(defun arche-diary--links-heading-regexp ()
+  "Return a regexp matching the links heading line, or nil when disabled."
+  (when (and arche-diary-links-heading
+             (not (string-empty-p arche-diary-links-heading)))
+    (concat "^\\* " (regexp-quote arche-diary-links-heading) "[ \t]*$")))
+
+(defun arche-diary--links-subtree-bounds ()
+  "Return (BEG . END) of the links subtree in the current buffer, or nil.
+BEG is the start of the heading line; END is the start of the next
+level-1 heading or `point-max'."
+  (let ((re (arche-diary--links-heading-regexp)))
+    (when re
+      (save-excursion
+        (goto-char (point-min))
+        (when (re-search-forward re nil t)
+          (cons (line-beginning-position)
+                (save-excursion
+                  (forward-line 1)
+                  (if (re-search-forward "^\\* " nil t)
+                      (line-beginning-position)
+                    (point-max)))))))))
+
+(defun arche-diary--links-subtree-string (path)
+  "Return the raw text of the links subtree in PATH, or nil.
+Heading and body are kept verbatim, trailing whitespace trimmed."
+  (when (and path (file-exists-p path))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((bounds (arche-diary--links-subtree-bounds)))
+        (when bounds
+          (let ((s (string-trim-right
+                    (buffer-substring-no-properties (car bounds) (cdr bounds)))))
+            (unless (string-empty-p s) s)))))))
+
+(defun arche-diary--month-links (path)
+  "Return the (URL . LABEL) links under the links heading in PATH.
+The list is in document order; LABEL falls back to URL when the
+Org link carries no description."
+  (when (and path (file-exists-p path))
+    (with-temp-buffer
+      (insert-file-contents path)
+      (let ((bounds (arche-diary--links-subtree-bounds))
+            results)
+        (when bounds
+          (goto-char (car bounds))
+          (while (re-search-forward
+                  "\\[\\[\\([^][]+\\)\\]\\(?:\\[\\([^][]*\\)\\]\\)?\\]"
+                  (cdr bounds) t)
+            (push (cons (match-string-no-properties 1)
+                        (or (match-string-no-properties 2)
+                            (match-string-no-properties 1)))
+                  results)))
+        (nreverse results)))))
+
+(defun arche-diary--seed-links (path year month)
+  "Seed freshly created PATH with the previous month's links subtree.
+Copies the links subtree from the most recent existing month
+strictly before YEAR/MONTH, verbatim, just below the front
+matter.  No-op when the feature is disabled or no earlier month
+carries a links subtree."
+  (when (and path (arche-diary--links-heading-regexp))
+    (let* ((prior (cl-find-if
+                   (lambda (e)
+                     (let ((ey (nth 0 e)) (em (nth 1 e)))
+                       (or (< ey year) (and (= ey year) (< em month)))))
+                   (reverse (arche-diary--find-or-list-month-files))))
+           (subtree (and prior (arche-diary--links-subtree-string (nth 2 prior)))))
+      (when subtree
+        (let* ((existing-buf (get-file-buffer path))
+               (buf (or existing-buf (find-file-noselect path))))
+          (with-current-buffer buf
+            (save-excursion
+              (goto-char (point-min))
+              ;; Skip the front matter: leading `#+keyword' and blank lines.
+              (while (and (not (eobp))
+                          (looking-at-p "^\\(#\\+\\|[ \t]*$\\)"))
+                (forward-line 1))
+              ;; Guarantee a blank line between front matter and the subtree.
+              (unless (or (bobp)
+                          (save-excursion
+                            (forward-line -1)
+                            (looking-at-p "^[ \t]*$")))
+                (insert "\n"))
+              (insert subtree "\n\n"))
+            (save-buffer))
+          (unless existing-buf (kill-buffer buf)))))))
+
 (defun arche-diary--ensure-monthly-file (year month)
-  "Return path of monthly file for YEAR/MONTH, creating it if needed."
+  "Return path of monthly file for YEAR/MONTH, creating it if needed.
+A newly created file inherits the previous month's links subtree
+\(see `arche-diary-links-heading')."
   (or (arche-diary--month-file year month)
-      (pcase arche-diary-file-creation-system
-        ('plain (arche-diary--create-plain-file year month))
-        ('denote (arche-diary--create-denote-file year month))
-        (other (user-error
-                "Unknown arche-diary-file-creation-system: %S" other)))))
+      (let ((path (pcase arche-diary-file-creation-system
+                    ('plain (arche-diary--create-plain-file year month))
+                    ('denote (arche-diary--create-denote-file year month))
+                    (other (user-error
+                            "Unknown arche-diary-file-creation-system: %S" other)))))
+        (arche-diary--seed-links path year month)
+        path)))
 
 
 ;;; Date heading helpers (buffer-local operations)
@@ -1260,30 +1373,57 @@ empty string when MONTHS is empty."
      (format "<h1>%04d-%02d</h1>\n" year month)
      (mapconcat #'identity date-htmls "\n<hr class=\"date-sep\">\n"))))
 
-(defun arche-diary--html-document (title nav body)
-  "Wrap NAV and BODY in a complete HTML document with TITLE.
+(defun arche-diary--links-html (links)
+  "Render LINKS, a list of (URL . LABEL), as a compact header nav.
+Return the empty string when LINKS is nil."
+  (if (null links)
+      ""
+    (concat
+     "<nav class=\"links\">"
+     (mapconcat
+      (lambda (l)
+        (format "<a href=\"%s\">%s</a>"
+                (arche-diary--html-escape (car l))
+                (arche-diary--html-escape (cdr l))))
+      links
+      "\n")
+     "</nav>")))
+
+(defun arche-diary--html-document (title nav links body)
+  "Wrap NAV, LINKS and BODY in a complete HTML document with TITLE.
 TITLE is used for the document `<title>' (browser tab).  The
-visible page heading at the top of the body is taken from
-`arche-diary-html-page-title', links to `index.html', and is
-emitted only when that is non-empty."
-  (concat
-   "<!DOCTYPE html>\n"
-   (format "<html lang=\"%s\">\n"
-           (arche-diary--html-escape arche-diary-html-lang))
-   "<head>\n"
-   "<meta charset=\"utf-8\">\n"
-   "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-   (format "<title>%s</title>\n" (arche-diary--html-escape title))
-   "<style>\n" arche-diary-html-css "\n</style>\n"
-   "</head>\n<body>\n"
-   (if (and arche-diary-html-page-title
-            (not (string-empty-p arche-diary-html-page-title)))
-       (format "<header><h1><a href=\"index.html\">%s</a></h1></header>\n"
-               (arche-diary--html-escape arche-diary-html-page-title))
-     "")
-   nav "\n"
-   body "\n"
-   "</body>\n</html>\n"))
+visible page heading is taken from `arche-diary-html-page-title'
+and links to `index.html'.  LINKS is the pre-rendered useful-links
+nav (see `arche-diary--links-html'); it and the heading share the
+`<header>', which is emitted whenever either is non-empty."
+  (let* ((page-title (and arche-diary-html-page-title
+                          (not (string-empty-p arche-diary-html-page-title))
+                          arche-diary-html-page-title))
+         (h1 (if page-title
+                 (format "<h1><a href=\"index.html\">%s</a></h1>"
+                         (arche-diary--html-escape page-title))
+               ""))
+         (links (or links ""))
+         (header (if (or (not (string-empty-p h1))
+                         (not (string-empty-p links)))
+                     (concat "<header>" h1
+                             (if (string-empty-p links) "" (concat "\n" links))
+                             "</header>\n")
+                   "")))
+    (concat
+     "<!DOCTYPE html>\n"
+     (format "<html lang=\"%s\">\n"
+             (arche-diary--html-escape arche-diary-html-lang))
+     "<head>\n"
+     "<meta charset=\"utf-8\">\n"
+     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+     (format "<title>%s</title>\n" (arche-diary--html-escape title))
+     "<style>\n" arche-diary-html-css "\n</style>\n"
+     "</head>\n<body>\n"
+     header
+     nav "\n"
+     body "\n"
+     "</body>\n</html>\n")))
 
 (defun arche-diary--month-html-stale-p (year month source-path)
   "Return non-nil if YEAR/MONTH's exported HTML is missing or out of date.
@@ -1318,6 +1458,7 @@ strictly newer than it."
                  (format "%s — %04d-%02d"
                          arche-diary-html-page-title year month)
                  (arche-diary--nav-html past)
+                 (arche-diary--links-html (arche-diary--month-links path))
                  (arche-diary--month-section-html year month data))))
       out)))
 
@@ -1330,6 +1471,7 @@ strictly newer than it."
            (n (length months))
            (recent-n (min arche-diary-html-index-recent-count n))
            (recent (nthcdr (- n recent-n) months))
+           (latest (car (last months)))
            (sections
             (mapconcat
              (lambda (entry)
@@ -1344,6 +1486,8 @@ strictly newer than it."
         (insert (arche-diary--html-document
                  arche-diary-html-page-title
                  (arche-diary--nav-html months)
+                 (arche-diary--links-html
+                  (arche-diary--month-links (nth 2 latest)))
                  sections)))
       out)))
 
