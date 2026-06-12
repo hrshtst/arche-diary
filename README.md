@@ -138,13 +138,14 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-denote-file-type` | `org` | File type passed to `denote`. |
 | `arche-diary-date-heading-format` | `"%Y-%m-%d %A"` | Date heading line format. |
 | `arche-diary-date-heading-regexp` | (see source) | Must capture the ISO date in group 1. |
-| `arche-diary-links-heading` | `"Links"` | Level-1 heading holding the month's header links; nil disables the feature (see below). |
+| `arche-diary-links-heading` | `"Links"` | Level-1 heading holding the month's link list; nil disables the feature (see below). |
 | `arche-diary-fill-dates-keep-buffers` | `start` | After a multi-month fill, keep only the `start` month's buffer (save + close the rest) or keep them `all`. |
 | `arche-diary-html-index-recent-count` | `2` | Months embedded directly in `index.html`. |
 | `arche-diary-html-page-title` | `"Diary"` | Base `<title>`, and the header heading (which links to `index.html`). |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
 | `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
-| `arche-diary-html-external-links-new-tab` | `t` | Open external (http/https) links — header links and links inside notes — in a new browser tab. Relative links are left in place. |
+| `arche-diary-html-external-links-new-tab` | `t` | Open external (http/https) links — the link list and links inside notes — in a new browser tab. Relative links are left in place. |
+| `arche-diary-html-links-separator` | `" \| "` | Divider placed between links in the link list (e.g. `" \| "` or `" / "`). |
 | `arche-diary-html-noexport-tags` | `("noexport")` | Heading tags that exclude a heading (and everything under it) from HTML export (see below). |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
@@ -211,7 +212,7 @@ satisfies. Set `arche-diary-html-noexport-tags` to nil to disable
 heading-level exclusion, or add your own tag (e.g. `"private"`) to the
 list.
 
-### Useful links in the header
+### Useful links
 
 Each monthly file can carry a short list of links — conferences that
 month, journal login pages under review, anything you keep returning to.
@@ -234,15 +235,17 @@ list:
 Because it is a normal Org list you edit it with the usual commands —
 `C-c C-l` to insert or edit a link, `C-c C-o` to open one, `M-RET` for a
 new bullet, `M-<up>`/`M-<down>` to reorder. On HTML export the links are
-rendered as a compact, horizontal row in the page header: each month page
-shows its own links, and `index.html` shows the latest month's. The
-`Links` heading itself is not a date, so it is otherwise ignored by
-parsing and never appears in the body.
+rendered as a compact, horizontal row just **below the month
+navigation**, divided by `arche-diary-html-links-separator` (default
+` | `; set it to ` / ` or anything else you like): each month page shows
+its own links, and `index.html` shows the latest month's. The `Links`
+heading itself is not a date, so it is otherwise ignored by parsing and
+never appears in the body.
 
 External (http/https) links open in a new browser tab by default — both
-these header links and any links you write inside notes — so following a
-link never navigates away from the diary. Relative links (page
-navigation, the title, images) open in place. Set
+these and any links you write inside notes — so following a link never
+navigates away from the diary. Relative links (page navigation, the
+title, images) open in place. Set
 `arche-diary-html-external-links-new-tab` to nil to disable this.
 
 When a **new** monthly file is created, the entire `Links` subtree from

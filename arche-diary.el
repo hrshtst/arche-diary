@@ -165,6 +165,13 @@ so they keep opening in place."
   :group 'arche-diary
   :type 'boolean)
 
+(defcustom arche-diary-html-links-separator " | "
+  "String placed between consecutive links in the header link list.
+Inserted verbatim between the rendered `<a>' elements, so it can
+be any visible divider, e.g. \" | \" or \" / \"."
+  :group 'arche-diary
+  :type 'string)
+
 (defcustom arche-diary-html-noexport-tags '("noexport")
   "Org heading tags that exclude a heading from HTML export.
 A date heading (level 1) or note heading (level 2) carrying any of
@@ -190,8 +197,7 @@ a { color:var(--link); text-decoration:none; }
 a:hover { text-decoration:underline; }
 nav { margin:0 0 1rem 0; font-size:.9rem; color:var(--muted);
       line-height:1.8; word-break:break-all; }
-nav.links { display:flex; flex-wrap:wrap; gap:.2rem 1rem;
-            margin:.25rem 0 1rem 0; }
+nav.links { margin:0 0 1rem 0; word-break:normal; overflow-wrap:anywhere; }
 nav.links a { color:var(--link); }
 hr { border:0; border-top:1px solid #ddd; margin:1.5rem 0; }
 hr.note-sep { border-top:1px dashed #eee; margin:.25rem 0; }
@@ -1384,7 +1390,8 @@ empty string when MONTHS is empty."
      (mapconcat #'identity date-htmls "\n<hr class=\"date-sep\">\n"))))
 
 (defun arche-diary--links-html (links)
-  "Render LINKS, a list of (URL . LABEL), as a compact header nav.
+  "Render LINKS, a list of (URL . LABEL), as a compact link nav.
+Consecutive links are divided by `arche-diary-html-links-separator'.
 Return the empty string when LINKS is nil."
   (if (null links)
       ""
@@ -1396,7 +1403,7 @@ Return the empty string when LINKS is nil."
                 (arche-diary--html-escape (car l))
                 (arche-diary--html-escape (cdr l))))
       links
-      "\n")
+      (arche-diary--html-escape arche-diary-html-links-separator))
      "</nav>")))
 
 (defun arche-diary--external-links-new-tab (html)
@@ -1419,22 +1426,16 @@ left untouched."
 TITLE is used for the document `<title>' (browser tab).  The
 visible page heading is taken from `arche-diary-html-page-title'
 and links to `index.html'.  LINKS is the pre-rendered useful-links
-nav (see `arche-diary--links-html'); it and the heading share the
-`<header>', which is emitted whenever either is non-empty."
+nav (see `arche-diary--links-html'); it is placed right below NAV,
+the month navigation."
   (let* ((page-title (and arche-diary-html-page-title
                           (not (string-empty-p arche-diary-html-page-title))
                           arche-diary-html-page-title))
-         (h1 (if page-title
-                 (format "<h1><a href=\"index.html\">%s</a></h1>"
-                         (arche-diary--html-escape page-title))
-               ""))
-         (links (or links ""))
-         (header (if (or (not (string-empty-p h1))
-                         (not (string-empty-p links)))
-                     (concat "<header>" h1
-                             (if (string-empty-p links) "" (concat "\n" links))
-                             "</header>\n")
-                   "")))
+         (header (if page-title
+                     (format "<header><h1><a href=\"index.html\">%s</a></h1></header>\n"
+                             (arche-diary--html-escape page-title))
+                   ""))
+         (links (or links "")))
     (let ((doc (concat
                 "<!DOCTYPE html>\n"
                 (format "<html lang=\"%s\">\n"
@@ -1447,6 +1448,7 @@ nav (see `arche-diary--links-html'); it and the heading share the
                 "</head>\n<body>\n"
                 header
                 nav "\n"
+                (if (string-empty-p links) "" (concat links "\n"))
                 body "\n"
                 "</body>\n</html>\n")))
       (if arche-diary-html-external-links-new-tab

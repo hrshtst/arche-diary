@@ -939,7 +939,7 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should-not (string-match-p "Secret part" html))
       (should-not (string-match-p "hidden detail" html)))))
 
-(ert-deftest arche-diary-tests/export-renders-header-links ()
+(ert-deftest arche-diary-tests/export-renders-links ()
   (arche-diary-tests--with-dir 'plain
     ;; Assert the bare link markup; new-tab rewriting has its own tests.
     (let ((arche-diary-html-external-links-new-tab nil))
@@ -951,10 +951,16 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
         (arche-diary-add-date "15")
         (insert "** Note\nbody.\n")
         (save-buffer))
-      (arche-diary-export-html '(2026 5))
+      ;; A later month gives the page a month nav to position against; it
+      ;; inherits May's links on creation.
+      (with-current-buffer (arche-diary-open-month '(2026 6))
+        (arche-diary-add-date "3")
+        (insert "** N\nb.\n")
+        (save-buffer))
+      (arche-diary-export-html 'all)
       (let ((html (with-temp-buffer
                     (insert-file-contents
-                     (expand-file-name "2026-05.html"
+                     (expand-file-name "2026-06.html"
                                        arche-diary-html-directory))
                     (buffer-string))))
         (should (string-match-p "<nav class=\"links\">" html))
@@ -963,11 +969,25 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
         (should (string-match-p
                  "<a href=\"https://journal.example.com/login\">Journal login</a>"
                  html))
+        ;; Links are divided by the separator, not by whitespace alone.
+        (should (string-match-p
+                 "</a> | <a href=\"https://journal.example.com/login\">" html))
         ;; ConfX comes before Journal login (document order).
         (should (< (string-match "ConfX" html)
                    (string-match "Journal login" html)))
+        ;; The links list sits below the month navigation.
+        (should (< (string-match "<nav>" html)
+                   (string-match "<nav class=\"links\">" html)))
         ;; The links heading is not exported as a date section.
         (should-not (string-match-p "<h2>Links" html))))))
+
+(ert-deftest arche-diary-tests/links-html-uses-separator ()
+  (let ((links '(("https://a.example" . "A") ("https://b.example" . "B"))))
+    (let ((arche-diary-html-links-separator " | "))
+      (should (string-match-p "</a> | <a " (arche-diary--links-html links))))
+    (let ((arche-diary-html-links-separator " / "))
+      (should (string-match-p "</a> / <a " (arche-diary--links-html links))))
+    (should (equal "" (arche-diary--links-html nil)))))
 
 (ert-deftest arche-diary-tests/index-shows-latest-month-links ()
   (arche-diary-tests--with-dir 'plain
