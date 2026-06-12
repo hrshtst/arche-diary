@@ -136,6 +136,18 @@ modified."
   :group 'arche-diary
   :type 'boolean)
 
+(defcustom arche-diary-html-noexport-tags '("noexport")
+  "Org heading tags that exclude a heading from HTML export.
+A date heading (level 1) or note heading (level 2) carrying any of
+these tags as a trailing `:tag:' is omitted entirely from the
+exported HTML, along with everything beneath it.  Subheadings
+*inside* a note body are handled by Org's own exporter via
+`org-export-exclude-tags', so keeping the default \"noexport\"
+here makes the same tag work uniformly at every heading level.
+Set to nil to disable heading-level exclusion."
+  :group 'arche-diary
+  :type '(repeat string))
+
 (defcustom arche-diary-html-css "\
 :root { --fg:#222; --bg:#fff; --muted:#888; --link:#366; }
 body { margin:2rem auto; max-width:40rem; padding:0 1rem;
@@ -1119,21 +1131,45 @@ rewritten so the exported page can resolve them."
                  str))))
     (string-trim (or (org-export-string-as str 'html t) ""))))
 
+(defun arche-diary--heading-tags (heading)
+  "Return the list of Org tags trailing HEADING, or nil.
+HEADING is the heading text after the leading stars and space."
+  (when (string-match "[ \t]+\\(:[[:alnum:]_@#%:]+:\\)[ \t]*\\'" heading)
+    (split-string (match-string 1 heading) ":" t)))
+
+(defun arche-diary--heading-strip-tags (heading)
+  "Return HEADING with any trailing Org tags removed and trimmed."
+  (string-trim
+   (if (string-match "[ \t]+:[[:alnum:]_@#%:]+:[ \t]*\\'" heading)
+       (substring heading 0 (match-beginning 0))
+     heading)))
+
+(defun arche-diary--heading-excluded-p (heading)
+  "Return non-nil when HEADING carries an export-excluding tag.
+The trailing Org tags of HEADING are matched against
+`arche-diary-html-noexport-tags'."
+  (and arche-diary-html-noexport-tags
+       (cl-some (lambda (tag) (member tag arche-diary-html-noexport-tags))
+                (arche-diary--heading-tags heading))))
+
 (defun arche-diary--collect-notes-after-point (bound)
   "Collect level-2 notes between point and BOUND, in document order.
-Each entry is a cons (TITLE . HTML-BODY)."
+Each entry is a cons (TITLE . HTML-BODY).  Notes whose heading
+carries a tag in `arche-diary-html-noexport-tags' are skipped."
   (let (results)
     (save-excursion
       (while (re-search-forward "^\\*\\* +\\(.*\\)$" bound t)
-        (let* ((title (string-trim (match-string-no-properties 1)))
-               (body-start (min (1+ (line-end-position)) (point-max)))
-               (body-end (save-excursion
-                           (if (re-search-forward "^\\*\\*? " bound t)
-                               (line-beginning-position)
-                             bound)))
-               (body-text (buffer-substring-no-properties body-start body-end))
-               (body-html (arche-diary--org-string-to-html body-text)))
-          (push (cons title body-html) results))))
+        (let ((heading (string-trim (match-string-no-properties 1))))
+          (unless (arche-diary--heading-excluded-p heading)
+            (let* ((title (arche-diary--heading-strip-tags heading))
+                   (body-start (min (1+ (line-end-position)) (point-max)))
+                   (body-end (save-excursion
+                               (if (re-search-forward "^\\*\\*? " bound t)
+                                   (line-beginning-position)
+                                 bound)))
+                   (body-text (buffer-substring-no-properties body-start body-end))
+                   (body-html (arche-diary--org-string-to-html body-text)))
+              (push (cons title body-html) results))))))
     (nreverse results)))
 
 (defun arche-diary--month-data (path)
@@ -1150,16 +1186,18 @@ outer list is also in document order (chronological)."
         (let* ((iso (match-string-no-properties 1))
                (line (buffer-substring-no-properties
                       (line-beginning-position) (line-end-position)))
-               (display (string-trim (substring line (length "* "))))
-               (block-end (save-excursion
+               (heading (string-trim (substring line (length "* ")))))
+          (unless (arche-diary--heading-excluded-p heading)
+            (let* ((display (arche-diary--heading-strip-tags heading))
+                   (block-end (save-excursion
+                                (forward-line 1)
+                                (if (re-search-forward "^\\* " nil t)
+                                    (line-beginning-position)
+                                  (point-max))))
+                   (notes (save-excursion
                             (forward-line 1)
-                            (if (re-search-forward "^\\* " nil t)
-                                (line-beginning-position)
-                              (point-max))))
-               (notes (save-excursion
-                        (forward-line 1)
-                        (arche-diary--collect-notes-after-point block-end))))
-          (push (list iso display notes) results)))
+                            (arche-diary--collect-notes-after-point block-end))))
+              (push (list iso display notes) results)))))
       (nreverse results))))
 
 (defun arche-diary--nav-html (months)

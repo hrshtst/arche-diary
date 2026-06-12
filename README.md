@@ -143,6 +143,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-html-page-title` | `"Diary"` | Base `<title>`, and the header heading (which links to `index.html`). |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
 | `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
+| `arche-diary-html-noexport-tags` | `("noexport")` | Heading tags that exclude a heading (and everything under it) from HTML export (see below). |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
 | `arche-diary-after-export-hook` | nil | Run after a successful export. |
@@ -183,6 +184,30 @@ becomes a single space and `#+begin_…` blocks are left verbatim. Only the
 exported HTML is affected; your Org files keep their wrapping. The whole
 thing is a no-op for diaries with no CJK text — set it to nil to turn it
 off entirely.
+
+### Confidential sections that are not exported
+
+To keep part of a diary out of the HTML while leaving it in the Org file,
+tag the heading with `:noexport:` (any tag listed in
+`arche-diary-html-noexport-tags`). The tagged heading and everything
+beneath it are dropped from the export, and the tag itself never appears
+in the output. This works at every level:
+
+```org
+* 2026-06-12 Friday               :noexport:   ← hides the whole day
+** Morning standup                              ← a normal, exported note
+** Salary negotiation notes       :noexport:   ← hides just this note
+** Trip planning
+Booked the flights.
+*** Surprise party budget         :noexport:   ← hides only this subsection
+```
+
+Whole-day and per-note exclusion is done by the package itself (it walks
+the file before Org runs); subsection exclusion (level 3 and below) is
+handled by Org's own `org-export-exclude-tags`, which `:noexport:` already
+satisfies. Set `arche-diary-html-noexport-tags` to nil to disable
+heading-level exclusion, or add your own tag (e.g. `"private"`) to the
+list.
 
 ## Deploying the exported HTML
 

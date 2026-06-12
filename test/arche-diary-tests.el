@@ -876,6 +876,68 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                  (expand-file-name "images/2026-05-15/e.png"
                                    arche-diary-html-directory)))))))
 
+(ert-deftest arche-diary-tests/export-omits-noexport-note ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (arche-diary-add-date "15")
+      (insert "** Public note\nshown body.\n")
+      (insert "** Secret note    :noexport:\nhidden body.\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "<h3>Public note</h3>" html))
+      (should (string-match-p "shown body" html))
+      (should-not (string-match-p "Secret note" html))
+      (should-not (string-match-p "hidden body" html))
+      ;; The tag itself must never leak into the output.
+      (should-not (string-match-p "noexport" html)))))
+
+(ert-deftest arche-diary-tests/export-omits-noexport-date ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (arche-diary-add-date "15")
+      (insert "** Visible\nshown body.\n")
+      (arche-diary-add-date "16")
+      ;; Tag the whole day; the date heading keeps its ISO prefix so it
+      ;; still matches `arche-diary-date-heading-regexp'.
+      (save-excursion
+        (goto-char (point-min))
+        (when (re-search-forward "^\\* 2026-05-16.*$" nil t)
+          (replace-match (concat (match-string 0) "    :noexport:") t t)))
+      (goto-char (point-max))
+      (insert "** Confidential\nhidden body.\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "2026-05-15" html))
+      (should (string-match-p "shown body" html))
+      (should-not (string-match-p "2026-05-16" html))
+      (should-not (string-match-p "Confidential" html))
+      (should-not (string-match-p "hidden body" html)))))
+
+(ert-deftest arche-diary-tests/export-omits-noexport-subheading ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (arche-diary-add-date "15")
+      (insert "** Mixed note\nintro text.\n*** Secret part    :noexport:\nhidden detail.\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "intro text" html))
+      (should-not (string-match-p "Secret part" html))
+      (should-not (string-match-p "hidden detail" html)))))
 
 (provide 'arche-diary-tests)
 
