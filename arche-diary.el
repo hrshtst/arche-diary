@@ -155,6 +155,16 @@ modified."
   :group 'arche-diary
   :type 'boolean)
 
+(defcustom arche-diary-html-external-links-new-tab t
+  "When non-nil, make external links open in a new browser tab.
+Every exported `<a>' whose href is an absolute http(s) URL gets
+`target=\"_blank\"' and `rel=\"noopener\"' added, covering both the
+header link list and links written inside diary notes.  Relative
+links — page navigation, the title link, images — are left alone,
+so they keep opening in place."
+  :group 'arche-diary
+  :type 'boolean)
+
 (defcustom arche-diary-html-noexport-tags '("noexport")
   "Org heading tags that exclude a heading from HTML export.
 A date heading (level 1) or note heading (level 2) carrying any of
@@ -1389,6 +1399,21 @@ Return the empty string when LINKS is nil."
       "\n")
      "</nav>")))
 
+(defun arche-diary--external-links-new-tab (html)
+  "Make external links in HTML open in a new tab.
+Add `target=\"_blank\"' and `rel=\"noopener\"' to every `<a>' tag
+whose href is an absolute http(s) URL and that does not already
+set a target.  Relative links (page nav, the title, images) are
+left untouched."
+  (replace-regexp-in-string
+   "<a\\b[^>]*>"
+   (lambda (tag)
+     (if (and (string-match-p "href=[\"']https?://" tag)
+              (not (string-match-p "\\btarget=" tag)))
+         (concat (substring tag 0 -1) " target=\"_blank\" rel=\"noopener\">")
+       tag))
+   html t t))
+
 (defun arche-diary--html-document (title nav links body)
   "Wrap NAV, LINKS and BODY in a complete HTML document with TITLE.
 TITLE is used for the document `<title>' (browser tab).  The
@@ -1410,20 +1435,23 @@ nav (see `arche-diary--links-html'); it and the heading share the
                              (if (string-empty-p links) "" (concat "\n" links))
                              "</header>\n")
                    "")))
-    (concat
-     "<!DOCTYPE html>\n"
-     (format "<html lang=\"%s\">\n"
-             (arche-diary--html-escape arche-diary-html-lang))
-     "<head>\n"
-     "<meta charset=\"utf-8\">\n"
-     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-     (format "<title>%s</title>\n" (arche-diary--html-escape title))
-     "<style>\n" arche-diary-html-css "\n</style>\n"
-     "</head>\n<body>\n"
-     header
-     nav "\n"
-     body "\n"
-     "</body>\n</html>\n")))
+    (let ((doc (concat
+                "<!DOCTYPE html>\n"
+                (format "<html lang=\"%s\">\n"
+                        (arche-diary--html-escape arche-diary-html-lang))
+                "<head>\n"
+                "<meta charset=\"utf-8\">\n"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+                (format "<title>%s</title>\n" (arche-diary--html-escape title))
+                "<style>\n" arche-diary-html-css "\n</style>\n"
+                "</head>\n<body>\n"
+                header
+                nav "\n"
+                body "\n"
+                "</body>\n</html>\n")))
+      (if arche-diary-html-external-links-new-tab
+          (arche-diary--external-links-new-tab doc)
+        doc))))
 
 (defun arche-diary--month-html-stale-p (year month source-path)
   "Return non-nil if YEAR/MONTH's exported HTML is missing or out of date.

@@ -941,31 +941,33 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
 
 (ert-deftest arche-diary-tests/export-renders-header-links ()
   (arche-diary-tests--with-dir 'plain
-    (with-current-buffer (arche-diary-open-month '(2026 5))
-      (goto-char (point-max))
-      (insert "* Links\n"
-              "- [[https://conf.example.com][ConfX]]\n"
-              "- [[https://journal.example.com/login][Journal login]]\n")
-      (arche-diary-add-date "15")
-      (insert "** Note\nbody.\n")
-      (save-buffer))
-    (arche-diary-export-html '(2026 5))
-    (let ((html (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "2026-05.html"
-                                     arche-diary-html-directory))
-                  (buffer-string))))
-      (should (string-match-p "<nav class=\"links\">" html))
-      (should (string-match-p
-               "<a href=\"https://conf.example.com\">ConfX</a>" html))
-      (should (string-match-p
-               "<a href=\"https://journal.example.com/login\">Journal login</a>"
-               html))
-      ;; ConfX comes before Journal login (document order).
-      (should (< (string-match "ConfX" html)
-                 (string-match "Journal login" html)))
-      ;; The links heading is not exported as a date section.
-      (should-not (string-match-p "<h2>Links" html)))))
+    ;; Assert the bare link markup; new-tab rewriting has its own tests.
+    (let ((arche-diary-html-external-links-new-tab nil))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (goto-char (point-max))
+        (insert "* Links\n"
+                "- [[https://conf.example.com][ConfX]]\n"
+                "- [[https://journal.example.com/login][Journal login]]\n")
+        (arche-diary-add-date "15")
+        (insert "** Note\nbody.\n")
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html"
+                                       arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p "<nav class=\"links\">" html))
+        (should (string-match-p
+                 "<a href=\"https://conf.example.com\">ConfX</a>" html))
+        (should (string-match-p
+                 "<a href=\"https://journal.example.com/login\">Journal login</a>"
+                 html))
+        ;; ConfX comes before Journal login (document order).
+        (should (< (string-match "ConfX" html)
+                   (string-match "Journal login" html)))
+        ;; The links heading is not exported as a date section.
+        (should-not (string-match-p "<h2>Links" html))))))
 
 (ert-deftest arche-diary-tests/index-shows-latest-month-links ()
   (arche-diary-tests--with-dir 'plain
@@ -983,15 +985,16 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (arche-diary-add-date "3")
       (insert "** N\nb.\n")
       (save-buffer))
-    (arche-diary-export-html 'all)
-    (let ((html (with-temp-buffer
-                  (insert-file-contents
-                   (expand-file-name "index.html" arche-diary-html-directory))
-                  (buffer-string))))
-      (should (string-match-p
-               "<a href=\"https://june.example.com\">JuneLink</a>" html))
-      (should-not (string-match-p "MayLink" html))
-      (should-not (string-match-p "may.example.com" html)))))
+    (let ((arche-diary-html-external-links-new-tab nil))
+      (arche-diary-export-html 'all)
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "index.html" arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p
+                 "<a href=\"https://june.example.com\">JuneLink</a>" html))
+        (should-not (string-match-p "MayLink" html))
+        (should-not (string-match-p "may.example.com" html))))))
 
 (ert-deftest arche-diary-tests/new-month-inherits-links ()
   (arche-diary-tests--with-dir 'plain
@@ -1035,6 +1038,54 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                                        arche-diary-html-directory))
                     (buffer-string))))
         (should-not (string-match-p "nav class=\"links\"" html))))))
+
+(ert-deftest arche-diary-tests/external-links-open-new-tab ()
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (goto-char (point-max))
+      (insert "* Links\n- [[https://conf.example.com][ConfX]]\n")
+      (arche-diary-add-date "15")
+      (insert "** Note\n"
+              "See [[https://external.example.org/p][paper]] "
+              "and [[file:images/x.png][local]].\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      ;; Header link (external) opens in a new tab.
+      (should (string-match-p
+               "<a href=\"https://conf.example.com\" target=\"_blank\" rel=\"noopener\">"
+               html))
+      ;; Note-body link (external) opens in a new tab.
+      (should (string-match-p
+               "<a href=\"https://external.example.org/p\" target=\"_blank\" rel=\"noopener\">"
+               html))
+      ;; The relative title link is left in place.
+      (should (string-match-p "<a href=\"index.html\">" html))
+      (should-not (string-match-p "index.html\" target=" html))
+      ;; The relative image-file link is left in place.
+      (should-not (string-match-p "images/x.png\" target=" html)))))
+
+(ert-deftest arche-diary-tests/external-links-new-tab-can-be-disabled ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-html-external-links-new-tab nil))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (goto-char (point-max))
+        (insert "* Links\n- [[https://conf.example.com][ConfX]]\n")
+        (arche-diary-add-date "15")
+        (insert "** N\nb.\n")
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((html (with-temp-buffer
+                    (insert-file-contents
+                     (expand-file-name "2026-05.html"
+                                       arche-diary-html-directory))
+                    (buffer-string))))
+        (should (string-match-p "<a href=\"https://conf.example.com\">" html))
+        (should-not (string-match-p "target=\"_blank\"" html))))))
 
 (provide 'arche-diary-tests)
 

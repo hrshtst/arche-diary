@@ -144,6 +144,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-html-page-title` | `"Diary"` | Base `<title>`, and the header heading (which links to `index.html`). |
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
 | `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
+| `arche-diary-html-external-links-new-tab` | `t` | Open external (http/https) links — header links and links inside notes — in a new browser tab. Relative links are left in place. |
 | `arche-diary-html-noexport-tags` | `("noexport")` | Heading tags that exclude a heading (and everything under it) from HTML export (see below). |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
@@ -237,6 +238,12 @@ rendered as a compact, horizontal row in the page header: each month page
 shows its own links, and `index.html` shows the latest month's. The
 `Links` heading itself is not a date, so it is otherwise ignored by
 parsing and never appears in the body.
+
+External (http/https) links open in a new browser tab by default — both
+these header links and any links you write inside notes — so following a
+link never navigates away from the diary. Relative links (page
+navigation, the title, images) open in place. Set
+`arche-diary-html-external-links-new-tab` to nil to disable this.
 
 When a **new** monthly file is created, the entire `Links` subtree from
 the most recent earlier month is copied over verbatim, so the list
