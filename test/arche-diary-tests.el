@@ -1145,6 +1145,66 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
         (should (string-match-p "<a href=\"https://conf.example.com\">" html))
         (should-not (string-match-p "target=\"_blank\"" html))))))
 
+;;;; Export performance caches
+
+(ert-deftest arche-diary-tests/image-copy-current-p ()
+  (let* ((dir (make-temp-file "arche-img-" 'directory))
+         (src (expand-file-name "a.png" dir))
+         (dest (expand-file-name "b.png" dir)))
+    (unwind-protect
+        (progn
+          ;; Missing destination is never current.
+          (with-temp-file src (insert "PNG-CONTENT"))
+          (should-not (arche-diary--image-copy-current-p src dest))
+          ;; A same-size copy made now (mtime >= src) is current.
+          (copy-file src dest t)
+          (should (arche-diary--image-copy-current-p src dest))
+          ;; A size change makes it stale even if the copy is newer.
+          (with-temp-file src (insert "PNG-CONTENT-LONGER"))
+          (should-not (arche-diary--image-copy-current-p src dest))
+          ;; Re-copy restores currency.
+          (copy-file src dest t)
+          (should (arche-diary--image-copy-current-p src dest))
+          ;; A source touched newer than the copy is stale (same size).
+          (set-file-times dest '(100 0))
+          (set-file-times src '(200 0))
+          (should-not (arche-diary--image-copy-current-p src dest)))
+      (delete-directory dir 'recursive))))
+
+(ert-deftest arche-diary-tests/month-files-cache-shares-one-scan ()
+  ;; Within the cache scope, the listing is frozen: a file created after
+  ;; the scope opens is not seen until the scope is rebuilt.
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary--ensure-monthly-file 2026 5)
+    (arche-diary--with-export-caches
+      (should (= 1 (length (arche-diary--find-or-list-month-files))))
+      (arche-diary--ensure-monthly-file 2026 6)
+      ;; Still 1: served from the cache, not re-scanned.
+      (should (= 1 (length (arche-diary--find-or-list-month-files)))))
+    ;; Outside the scope the fresh file is visible.
+    (should (= 2 (length (arche-diary--find-or-list-month-files))))))
+
+(ert-deftest arche-diary-tests/month-data-cache-memoizes-by-path ()
+  ;; Within the cache scope, a month parsed once is not re-read: editing
+  ;; the file on disk does not change the cached result.
+  (arche-diary-tests--with-dir 'plain
+    (let ((path (arche-diary--ensure-monthly-file 2026 5)))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (insert "** N\nfirst.\n")
+        (save-buffer))
+      (arche-diary--with-export-caches
+        (let ((first (arche-diary--month-data path)))
+          ;; Mutate the source on disk behind the cache's back.
+          (with-temp-file path
+            (insert-file-contents path)
+            (goto-char (point-max))
+            (insert "* 2026-06-16 Tuesday\n** M\nsecond.\n"))
+          (should (equal first (arche-diary--month-data path)))))
+      ;; A fresh scope reflects the new content.
+      (arche-diary--with-export-caches
+        (should (= 2 (length (arche-diary--month-data path))))))))
+
 (provide 'arche-diary-tests)
 
 ;;; arche-diary-tests.el ends here

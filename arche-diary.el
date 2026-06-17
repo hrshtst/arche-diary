@@ -519,9 +519,49 @@ Return nil if no recognizable title is present."
     (when (string-match "__\\([^/.]+\\)\\." name)
       (member keyword (split-string (match-string 1 name) "_" t)))))
 
+(defvar arche-diary--month-files-cache nil
+  "Per-export cache of the monthly file listing.
+When non-nil it is a cons (t . ENTRIES) holding the result of
+`arche-diary--list-month-files'.  Bound for the dynamic extent of
+one export (see `arche-diary--with-export-caches'); nil means scan
+the directory afresh.")
+
+(defvar arche-diary--month-data-cache nil
+  "Per-export cache mapping a month's Org PATH to its parsed data.
+A hash table when active, else nil.  Bound for the dynamic extent
+of one export so a month read once (e.g. for its own page) is not
+re-parsed and re-exported for `index.html'.")
+
+(defmacro arche-diary--with-export-caches (&rest body)
+  "Run BODY with the directory listing and per-month data memoized.
+This is sound only because the Org sources are not modified during
+an export: a single command may scan the directory and render the
+same month several times (its own page plus `index.html'), and
+without memoization each scan re-runs `denote-directory-files' and
+each render re-exports every note through Org.  Nesting reuses the
+outer caches."
+  (declare (indent 0) (debug t))
+  `(let ((arche-diary--month-files-cache
+          (or arche-diary--month-files-cache
+              (cons t (arche-diary--list-month-files))))
+         (arche-diary--month-data-cache
+          (or arche-diary--month-data-cache
+              (make-hash-table :test 'equal))))
+     ,@body))
+
 (defun arche-diary--find-or-list-month-files ()
   "Return list of (YEAR MONTH PATH) for every monthly diary file.
-Sorted in ascending chronological order."
+Sorted in ascending chronological order.  Uses the per-export
+cache (`arche-diary--month-files-cache') when one is active."
+  (if arche-diary--month-files-cache
+      (cdr arche-diary--month-files-cache)
+    (arche-diary--list-month-files)))
+
+(defun arche-diary--list-month-files ()
+  "Scan the diary directory for monthly files, ascending.
+Returns (YEAR MONTH PATH) entries.  Always hits the filesystem;
+callers within an export should go through
+`arche-diary--find-or-list-month-files' so one scan is shared."
   (let ((entries nil))
     (when (file-directory-p arche-diary-directory)
       (pcase arche-diary-file-creation-system
@@ -796,6 +836,22 @@ Leaves point on the blank line right after the heading."
              (erase-buffer)
              (insert-file-contents-literally b)
              (string= ca (buffer-string)))))))
+
+(defun arche-diary--image-copy-current-p (src dest)
+  "Return non-nil if DEST is an up-to-date export copy of SRC.
+Compares only existence, byte size and modification time, avoiding
+a full read of potentially large image files on every export.
+DEST is considered current when it exists, matches SRC in size,
+and is not older than SRC — the same mtime-based staleness model
+the package uses elsewhere (see `arche-diary--month-html-stale-p').
+Because the export copies to a deterministic destination, a
+changed source is caught by a size difference or a newer mtime."
+  (let ((da (and (file-exists-p dest) (file-attributes dest)))
+        (sa (file-attributes src)))
+    (and da sa
+         (= (file-attribute-size sa) (file-attribute-size da))
+         (not (time-less-p (file-attribute-modification-time da)
+                           (file-attribute-modification-time sa))))))
 
 (defun arche-diary--enclosing-date-iso ()
   "Return the ISO date of the date heading point is under.
@@ -1149,8 +1205,7 @@ self-contained."
                   (reldest (car d))
                   (absdest (cdr d)))
              (make-directory (file-name-directory absdest) t)
-             (unless (and (file-exists-p absdest)
-                          (arche-diary--files-identical-p abs absdest))
+             (unless (arche-diary--image-copy-current-p abs absdest)
                (copy-file abs absdest t))
              (format "[[file:%s]%s]" reldest desc))
          m)))
@@ -1341,7 +1396,21 @@ carries a tag in `arche-diary-html-noexport-tags' are skipped."
 (defun arche-diary--month-data (path)
   "Read PATH and return list of (ISO HEADING-DISPLAY NOTES).
 NOTES is a list of (TITLE . HTML-BODY) in document order.  The
-outer list is also in document order (chronological)."
+outer list is also in document order (chronological).  When a
+per-export cache is active (`arche-diary--month-data-cache') the
+result is memoized by PATH, so a month rendered for its own page
+is not re-parsed and re-exported for `index.html'."
+  (if arche-diary--month-data-cache
+      (let ((hit (gethash path arche-diary--month-data-cache 'miss)))
+        (if (eq hit 'miss)
+            (puthash path (arche-diary--read-month-data path)
+                     arche-diary--month-data-cache)
+          hit))
+    (arche-diary--read-month-data path)))
+
+(defun arche-diary--read-month-data (path)
+  "Parse PATH and return its month data; see `arche-diary--month-data'.
+This always reads and exports from disk, bypassing any cache."
   (with-temp-buffer
     (insert-file-contents path)
     (let ((org-inhibit-startup t))
@@ -1579,35 +1648,36 @@ month.  Any explicit MONTH (including `all') always rebuilds
      (list (let ((s (read-from-minibuffer "Month: ")))
              (and (not (string-empty-p s)) s))))
     (t (list nil))))
-  (cl-flet ((finish (&optional count)
-              (arche-diary--render-index-html)
-              (run-hooks 'arche-diary-after-export-hook)
-              (if count
-                  (message
-                   "arche-diary: exported %d month(s); HTML written to %s"
-                   count (arche-diary--html-directory))
-                (message "arche-diary: HTML written to %s"
-                         (arche-diary--html-directory)))))
-    (cond
-     ((eq month 'all)
-      (dolist (entry (arche-diary--find-or-list-month-files))
-        (arche-diary--render-month-html (nth 0 entry) (nth 1 entry)))
-      (finish))
-     ((null month)
-      (let ((stale (cl-remove-if-not
-                    (lambda (e)
-                      (arche-diary--month-html-stale-p
-                       (nth 0 e) (nth 1 e) (nth 2 e)))
-                    (arche-diary--find-or-list-month-files))))
-        (if (null stale)
-            (message "arche-diary: HTML already up to date")
-          (dolist (e stale)
-            (arche-diary--render-month-html (nth 0 e) (nth 1 e)))
-          (finish (length stale)))))
-     (t
-      (pcase-let ((`(,y . ,m) (arche-diary--parse-month month)))
-        (arche-diary--render-month-html y m))
-      (finish)))))
+  (arche-diary--with-export-caches
+    (cl-flet ((finish (&optional count)
+                (arche-diary--render-index-html)
+                (run-hooks 'arche-diary-after-export-hook)
+                (if count
+                    (message
+                     "arche-diary: exported %d month(s); HTML written to %s"
+                     count (arche-diary--html-directory))
+                  (message "arche-diary: HTML written to %s"
+                           (arche-diary--html-directory)))))
+      (cond
+       ((eq month 'all)
+        (dolist (entry (arche-diary--find-or-list-month-files))
+          (arche-diary--render-month-html (nth 0 entry) (nth 1 entry)))
+        (finish))
+       ((null month)
+        (let ((stale (cl-remove-if-not
+                      (lambda (e)
+                        (arche-diary--month-html-stale-p
+                         (nth 0 e) (nth 1 e) (nth 2 e)))
+                      (arche-diary--find-or-list-month-files))))
+          (if (null stale)
+              (message "arche-diary: HTML already up to date")
+            (dolist (e stale)
+              (arche-diary--render-month-html (nth 0 e) (nth 1 e)))
+            (finish (length stale)))))
+       (t
+        (pcase-let ((`(,y . ,m) (arche-diary--parse-month month)))
+          (arche-diary--render-month-html y m))
+        (finish))))))
 
 
 (provide 'arche-diary)
