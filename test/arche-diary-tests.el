@@ -1171,6 +1171,15 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
           (should-not (arche-diary--image-copy-current-p src dest)))
       (delete-directory dir 'recursive))))
 
+(ert-deftest arche-diary-tests/export-caches-suppress-org-modules ()
+  ;; The export scope pins `org-modules-loaded' so the first export in a
+  ;; session does not pay `org-load-modules-maybe' (loading Gnus/EWW/etc.),
+  ;; and it must not leak: the user's value is restored on exit.
+  (let ((org-modules-loaded nil))
+    (arche-diary--with-export-caches
+      (should (eq org-modules-loaded t)))
+    (should (eq org-modules-loaded nil))))
+
 (ert-deftest arche-diary-tests/month-files-cache-shares-one-scan ()
   ;; Within the cache scope, the listing is frozen: a file created after
   ;; the scope opens is not seen until the scope is rebuilt.

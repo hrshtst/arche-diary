@@ -533,20 +533,33 @@ of one export so a month read once (e.g. for its own page) is not
 re-parsed and re-exported for `index.html'.")
 
 (defmacro arche-diary--with-export-caches (&rest body)
-  "Run BODY with the directory listing and per-month data memoized.
-This is sound only because the Org sources are not modified during
-an export: a single command may scan the directory and render the
-same month several times (its own page plus `index.html'), and
-without memoization each scan re-runs `denote-directory-files' and
-each render re-exports every note through Org.  Nesting reuses the
-outer caches."
+  "Run BODY in the dynamic environment used for one export.
+
+Two per-export caches are bound, sound only because the Org
+sources are not modified during an export: a single command may
+scan the directory and render the same month several times (its
+own page plus `index.html'), and without memoization each scan
+re-runs `denote-directory-files' and each render re-exports every
+note through Org.  Nesting reuses the outer caches.
+
+It also pins `org-modules-loaded' to t for the duration.  The
+first Org export in an Emacs session otherwise calls
+`org-load-modules-maybe', which loads every entry in `org-modules'
+\(by default the Gnus, EWW, BibTeX, DocView, … link backends and
+their large dependency trees) — several seconds, dwarfing the
+actual render.  The diary only uses core `file:'/`http(s):' links,
+handled by `ol' itself, so that load is pure overhead here.  The
+`let' binding makes `org-load-modules-maybe' a no-op without
+running its inner global `setq', so a later real Org buffer still
+loads the user's modules normally."
   (declare (indent 0) (debug t))
   `(let ((arche-diary--month-files-cache
           (or arche-diary--month-files-cache
               (cons t (arche-diary--list-month-files))))
          (arche-diary--month-data-cache
           (or arche-diary--month-data-cache
-              (make-hash-table :test 'equal))))
+              (make-hash-table :test 'equal)))
+         (org-modules-loaded t))
      ,@body))
 
 (defun arche-diary--find-or-list-month-files ()
