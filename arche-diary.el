@@ -1197,6 +1197,17 @@ Such a line is never folded onto the preceding one.")
 List items are absent on purpose: their wrapped continuation lines
 should fold back onto the bullet.")
 
+(defconst arche-diary--zero-width-space "​"
+  "A zero-width space (U+200B).
+It renders to nothing in HTML yet counts as whitespace to Org's
+emphasis parser, so it can separate a CJK character from an
+adjacent emphasis marker without producing a visible gap.")
+
+(defconst arche-diary--emphasis-marker-re "[*/_=~+]"
+  "Regexp matching a single Org emphasis marker character.
+These are the markers from `org-emphasis-alist': bold, italic,
+underline, verbatim, code and strike-through.")
+
 (defun arche-diary--cjk-head-p (s)
   "Return non-nil if the first non-blank character of S is CJK."
   (let ((s (string-trim-left s)))
@@ -1209,15 +1220,30 @@ should fold back onto the bullet.")
     (and (> (length s) 0)
          (string-match-p arche-diary--cjk-regexp (substring s -1)))))
 
+(defun arche-diary--emphasis-at-boundary-p (prev cont)
+  "Return non-nil if PREV ends or CONT begins with an emphasis marker.
+PREV and CONT are the two text fragments about to be joined when a
+hard-wrapped line is folded.  Org only recognizes an emphasis
+marker that borders whitespace or a line edge, so a marker landing
+directly against a CJK character at the fold would silently lose
+its markup."
+  (or (and (> (length prev) 0)
+           (string-match-p arche-diary--emphasis-marker-re (substring prev -1)))
+      (and (> (length cont) 0)
+           (string-match-p arche-diary--emphasis-marker-re (substring cont 0 1)))))
+
 (defun arche-diary--unfill-cjk (str)
   "Join hard-wrapped lines in STR for CJK-friendly HTML export.
 Within a paragraph or list item, a line break is dropped entirely
 when a CJK character is on either side of it (CJK text has no
 inter-word spaces, so the break would otherwise render as a stray
 space); a break between two non-CJK words becomes a single space,
-matching how a browser would render the newline.  Blank lines,
-headings, lists, tables, keywords and `#+begin_..#+end_' blocks
-keep their own lines."
+matching how a browser would render the newline.  When a dropped
+break would press an Org emphasis marker (e.g. `~code~') directly
+against a CJK character — which Org refuses to parse as emphasis —
+a zero-width space is inserted instead, so the markup survives
+without a visible gap.  Blank lines, headings, lists, tables,
+keywords and `#+begin_..#+end_' blocks keep their own lines."
   (let ((acc nil)
         (in-block nil))
     (dolist (line (split-string str "\n"))
@@ -1235,9 +1261,20 @@ keep their own lines."
              (not (string-match-p arche-diary--unfill-element-start-re line)))
         (let* ((prev (string-trim-right (car acc)))
                (cont (string-trim-left line))
-               (sep (if (or (arche-diary--cjk-tail-p prev)
-                            (arche-diary--cjk-head-p cont))
-                        "" " ")))
+               (sep (cond
+                     ;; A CJK character on either side: drop the break so it
+                     ;; does not render as a stray space.  But if an emphasis
+                     ;; marker borders the fold, separate the two with a
+                     ;; zero-width space so Org still parses the markup while
+                     ;; the page shows no gap.
+                     ((or (arche-diary--cjk-tail-p prev)
+                          (arche-diary--cjk-head-p cont))
+                      (if (arche-diary--emphasis-at-boundary-p prev cont)
+                          arche-diary--zero-width-space
+                        ""))
+                     ;; Two non-CJK words: one space, as a browser would render
+                     ;; the newline.
+                     (t " "))))
           (setcar acc (concat prev sep cont))))
        (t (push line acc))))
     (mapconcat #'identity (nreverse acc) "\n")))

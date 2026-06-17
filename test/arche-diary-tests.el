@@ -605,6 +605,28 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                   "前置き\n#+begin_src sh\nあ\nい\n#+end_src\n後ろ")
                  "前置き\n#+begin_src sh\nあ\nい\n#+end_src\n後ろ")))
 
+(ert-deftest arche-diary-tests/unfill-cjk-keeps-emphasis-opening-marker ()
+  ;; A break before a leading emphasis marker would, if dropped, press the
+  ;; marker against a CJK character — which Org will not parse.  A zero-width
+  ;; space keeps the markup parseable while leaving no visible gap.
+  (should (equal (arche-diary--unfill-cjk "試したら\n~Fuzzel~ が良かった。")
+                 (concat "試したら" arche-diary--zero-width-space
+                         "~Fuzzel~ が良かった。"))))
+
+(ert-deftest arche-diary-tests/unfill-cjk-keeps-emphasis-closing-marker ()
+  ;; The mirror case: a trailing closing marker pressed against the CJK head
+  ;; of the next line.
+  (should (equal (arche-diary--unfill-cjk "試した ~Fuzzel~\nが良かった。")
+                 (concat "試した ~Fuzzel~" arche-diary--zero-width-space
+                         "が良かった。"))))
+
+(ert-deftest arche-diary-tests/unfill-cjk-no-zwsp-without-marker ()
+  ;; An ordinary CJK fold with no marker at the boundary stays free of the
+  ;; zero-width space.
+  (should-not (string-match-p arche-diary--zero-width-space
+                              (arche-diary--unfill-cjk
+                               "リハビリ\nがてら日記を書いた。"))))
+
 (ert-deftest arche-diary-tests/export-unfills-cjk-lines ()
   (arche-diary-tests--with-dir 'plain
     (with-current-buffer (arche-diary-open-month '(2026 5))
@@ -618,6 +640,22 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                   (buffer-string))))
       (should (string-match-p "リハビリがてら日記を書いた。" html))
       (should-not (string-match-p "リハビリ\nがてら" html)))))
+
+(ert-deftest arche-diary-tests/export-unfilled-cjk-keeps-emphasis ()
+  ;; An emphasis marker wrapped onto its own line after a CJK character must
+  ;; still export as emphasis, not literal `~...~' text.
+  (arche-diary-tests--with-dir 'plain
+    (with-current-buffer (arche-diary-open-month '(2026 5))
+      (arche-diary-add-date "15")
+      (insert "** メモ\nクリップボードマネージャーを試したら\n~Fuzzel~ が良かった。\n")
+      (save-buffer))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html" arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "<code>Fuzzel</code>" html))
+      (should-not (string-match-p "~Fuzzel~" html)))))
 
 (ert-deftest arche-diary-tests/export-unfill-cjk-can-be-disabled ()
   (arche-diary-tests--with-dir 'plain

@@ -183,7 +183,11 @@ visible space — wrong for scripts with no inter-word spaces. With
 `arche-diary-html-unfill-cjk` (on by default) the exporter folds those
 wrapped lines back together: a break is dropped wherever a CJK character
 sits on either side of it, while a break between two non-CJK words still
-becomes a single space and `#+begin_…` blocks are left verbatim. Only the
+becomes a single space and `#+begin_…` blocks are left verbatim. If a
+dropped break would push an emphasis marker (such as `~code~` or
+`*bold*`) hard against a CJK character — e.g. you wrapped right before
+`~Fuzzel~` — a zero-width space is inserted so the markup still renders,
+without leaving any visible gap. Only the
 exported HTML is affected; your Org files keep their wrapping. The whole
 thing is a no-op for diaries with no CJK text — set it to nil to turn it
 off entirely.
