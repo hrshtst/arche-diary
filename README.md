@@ -94,6 +94,37 @@ On HTML export, every referenced image is copied into
 `arche-diary-html-directory` (mirroring its subtree under `images/`) and the
 `<img>` `src` is rewritten so the exported HTML folder is self-contained.
 
+#### Metadata (EXIF) stripping
+
+A photograph carries metadata — camera model, timestamps, often GPS
+coordinates — that would otherwise be published along with the picture. The
+copy the export writes into `arche-diary-html-directory` therefore has its
+metadata stripped (`arche-diary-html-strip-image-metadata`, `t` by default).
+
+Stripping happens **at export, on the published copy** — the only images that
+leave the machine — rather than at insertion. That way it covers every image a
+note links to: the diary's own copies, originals linked in place with `C-u`,
+links written by hand, and photographs inserted long before this option
+existed. Neither the linked file nor the diary's copy under
+`arche-diary-image-directory` is touched: they keep their metadata, so the
+diary stays a faithful archive while what you upload does not carry your
+camera's GPS trail.
+
+Stripping runs an external program — the first of
+`arche-diary-html-strip-image-metadata-commands` found on `exec-path`:
+
+| Program | Notes |
+| --- | --- |
+| `exiftool -all= -overwrite_original` | Preferred: rewrites only the metadata segments, leaving the image data untouched. |
+| `mogrify -strip` (ImageMagick) | Fallback; re-encodes the image data, so a JPEG is recompressed. |
+| `magick mogrify -strip` | Same, for ImageMagick 7 without the compatibility symlinks. |
+
+The program never sees a file you own: the image is copied to a temporary file
+first and the program rewrites that copy. If none is installed, or the program
+fails, the image is published unchanged and a message says so — the export
+still succeeds. SVG is skipped (it is XML, which these programs either refuse
+to write or rasterize).
+
 #### Multiple images in a row (galleries)
 
 Inserted images stack vertically (each is its own block). To lay several
@@ -147,6 +178,8 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-html-external-links-new-tab` | `t` | Open external (http/https) links — the link list and links inside notes — in a new browser tab. Relative links are left in place. |
 | `arche-diary-html-links-separator` | `" \| "` | Divider placed between links in the link list (e.g. `" \| "` or `" / "`). |
 | `arche-diary-html-noexport-tags` | `("noexport")` | Heading tags that exclude a heading (and everything under it) from HTML export (see below). |
+| `arche-diary-html-strip-image-metadata` | `t` | Strip EXIF/GPS metadata from the published copy of every image. The diary's own files are never touched (see above). |
+| `arche-diary-html-strip-image-metadata-commands` | exiftool, mogrify | In-place stripping commands, tried in order; the first one installed wins. |
 | `arche-diary-html-css` | minimal default | CSS embedded in every page. |
 | `arche-diary-after-add-date-hook` | nil | Run after adding a date heading. |
 | `arche-diary-after-export-hook` | nil | Run after a successful export. |

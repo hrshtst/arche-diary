@@ -766,6 +766,144 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
           (should (string-match-p "#\\+NAME: fig:dup\n" s))
           (should (string-match-p "#\\+NAME: fig:dup-2\n" s)))))))
 
+;;;; export-time image metadata stripping
+
+;; The suite must not depend on exiftool or ImageMagick being installed,
+;; so the stripping command is a shell one-liner that rewrites the file
+;; it is handed (`sh -c SCRIPT FILE' passes FILE as $0).  It stands in
+;; for a real stripper: whatever it rewrites is what a real one would
+;; have rewritten, and whatever it leaves alone a real one never saw.
+(defconst arche-diary-tests--fake-strip-commands
+  '(("sh" "-c" "printf STRIPPED > \"$0\"")))
+
+(defun arche-diary-tests--contents (path)
+  "Return the contents of PATH as a string."
+  (with-temp-buffer
+    (insert-file-contents-literally path)
+    (buffer-string)))
+
+(defun arche-diary-tests--write-image-note (src &optional no-copy)
+  "Add a May 2026 note linking image SRC, and export it.
+NO-COPY is passed to `arche-diary-insert-image', so the note links
+either the diary's copy of SRC or SRC itself."
+  (with-current-buffer (arche-diary-open-month '(2026 5))
+    (arche-diary-add-date "15")
+    (goto-char (point-max))
+    (insert "** photo\n")
+    (arche-diary-insert-image src no-copy)
+    (save-buffer))
+  (arche-diary-export-html '(2026 5)))
+
+(ert-deftest arche-diary-tests/export-strips-image-metadata ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "exif.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (arche-diary-tests--write-image-note src)
+      (let ((diary-copy (expand-file-name "images/2026-05-15/exif.jpg"
+                                          arche-diary-directory))
+            (html-copy (expand-file-name "images/2026-05-15/exif.jpg"
+                                         arche-diary-html-directory)))
+        ;; Only the published copy is stripped.
+        (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))
+        (should (equal (arche-diary-tests--contents diary-copy) "JPEGDATA"))
+        (should (equal (arche-diary-tests--contents src) "JPEGDATA"))
+        ;; The published copy comes from a 0600 temporary file, but must
+        ;; end up with the mode bits a direct copy would have given it.
+        (should (= (file-modes html-copy)
+                   (logand (file-modes diary-copy) (default-file-modes))))))))
+
+(ert-deftest arche-diary-tests/export-strips-image-linked-in-place ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "inplace.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      ;; Inserted with NO-COPY: the note links the original where it
+      ;; sits, and the export is the only thing that copies it.
+      (arche-diary-tests--write-image-note src t)
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/inplace.jpg"
+                                        arche-diary-html-directory))
+                     "STRIPPED"))
+      (should (equal (arche-diary-tests--contents src) "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/export-strip-can-be-disabled ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata nil)
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "keep.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (arche-diary-tests--write-image-note src)
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/keep.jpg"
+                                        arche-diary-html-directory))
+                     "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/export-strip-skips-svg ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "vec.svg" tmpdir)))
+      (with-temp-file src (insert "<svg/>"))
+      (arche-diary-tests--write-image-note src)
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/vec.svg"
+                                        arche-diary-html-directory))
+                     "<svg/>")))))
+
+(ert-deftest arche-diary-tests/export-strip-failure-copies-unchanged ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands '(("false")))
+          (src (expand-file-name "fail.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (arche-diary-tests--write-image-note src)
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/fail.jpg"
+                                        arche-diary-html-directory))
+                     "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/export-strip-without-program-copies-unchanged ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           '(("arche-diary-no-such-strip-program")))
+          (src (expand-file-name "none.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (arche-diary-tests--write-image-note src)
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/none.jpg"
+                                        arche-diary-html-directory))
+                     "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/image-copy-current-p-ignores-size ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((src (expand-file-name "src.jpg" tmpdir))
+          (dest (expand-file-name "dest.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA-WITH-METADATA"))
+      ;; A stripped copy is smaller than its source; as long as it is not
+      ;; older it is current, or every export would strip it again.
+      (with-temp-file dest (insert "JPEGDATA"))
+      (set-file-times src '(20000 0))
+      (set-file-times dest '(20001 0))
+      (should (arche-diary--image-copy-current-p src dest))
+      ;; An older copy is still stale.
+      (set-file-times dest '(19999 0))
+      (should-not (arche-diary--image-copy-current-p src dest)))))
+
 (ert-deftest arche-diary-tests/directories-default-under-diary-dir ()
   (arche-diary-tests--with-dir 'plain
     (let ((arche-diary-html-directory nil)

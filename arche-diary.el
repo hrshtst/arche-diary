@@ -172,6 +172,42 @@ be any visible divider, e.g. \" | \" or \" / \"."
   :group 'arche-diary
   :type 'string)
 
+(defcustom arche-diary-html-strip-image-metadata t
+  "If non-nil, strip metadata from images copied into the html dir.
+Metadata such as EXIF (camera model, timestamps, GPS coordinates)
+travels inside a photograph and would otherwise be published along
+with it.  Stripping happens at export, on the copy the export makes
+in `arche-diary-html-directory' — the only images that leave the
+machine — so it covers every image a note links to, whether it was
+copied into the diary or linked in place, and it applies to images
+inserted long before this option existed.  Neither the linked file
+nor the diary's own copy under `arche-diary-image-directory' is
+modified: those keep their metadata, so the diary stays a faithful
+archive while what is published does not.
+
+Stripping needs one of `arche-diary-html-strip-image-metadata-commands'
+to be installed; when none is found the image is copied unchanged
+and a message says so."
+  :group 'arche-diary
+  :type 'boolean)
+
+(defcustom arche-diary-html-strip-image-metadata-commands
+  '(("exiftool" "-quiet" "-all=" "-overwrite_original")
+    ("mogrify" "-strip")
+    ("magick" "mogrify" "-strip"))
+  "Candidate commands that strip an image file's metadata in place.
+Each element is a list (PROGRAM ARGS...).  The first PROGRAM found
+in `exec-path' is used, with the file to strip appended as the
+final argument, so the command must rewrite the file it is given.
+
+The default prefers exiftool because it rewrites only the metadata
+segments, whereas ImageMagick's `mogrify -strip' re-encodes the
+image data (recompressing a JPEG).  Neither is ever pointed at a
+file the user owns: the export copies the image to a temporary file
+first and runs the command on that copy."
+  :group 'arche-diary
+  :type '(repeat (repeat :tag "Command" string)))
+
 (defcustom arche-diary-html-noexport-tags '("noexport")
   "Org heading tags that exclude a heading from HTML export.
 A date heading (level 1) or note heading (level 2) carrying any of
@@ -852,19 +888,107 @@ Leaves point on the blank line right after the heading."
 
 (defun arche-diary--image-copy-current-p (src dest)
   "Return non-nil if DEST is an up-to-date export copy of SRC.
-Compares only existence, byte size and modification time, avoiding
-a full read of potentially large image files on every export.
-DEST is considered current when it exists, matches SRC in size,
-and is not older than SRC — the same mtime-based staleness model
-the package uses elsewhere (see `arche-diary--month-html-stale-p').
-Because the export copies to a deterministic destination, a
-changed source is caught by a size difference or a newer mtime."
+Compares only existence and modification time, avoiding a full read
+of potentially large image files on every export: DEST is current
+when it exists and is not older than SRC — the same mtime-based
+staleness model the package uses elsewhere (see
+`arche-diary--month-html-stale-p').  Because the export copies to a
+deterministic destination that nothing else writes, a changed
+source is caught by its newer mtime.
+
+Byte size is deliberately not compared: with
+`arche-diary-html-strip-image-metadata' on, DEST is a stripped copy
+of SRC and legitimately differs in size, which would make every
+image look stale on every export and be re-stripped forever."
   (let ((da (and (file-exists-p dest) (file-attributes dest)))
         (sa (file-attributes src)))
     (and da sa
-         (= (file-attribute-size sa) (file-attribute-size da))
          (not (time-less-p (file-attribute-modification-time da)
                            (file-attribute-modification-time sa))))))
+
+(defconst arche-diary--image-strip-extensions
+  '("png" "jpg" "jpeg" "gif" "webp" "tiff" "tif")
+  "Extensions of images whose exported copy gets its metadata stripped.
+Raster formats that can carry EXIF-style metadata.  SVG is left
+alone: it is XML, and the stripping programs either refuse to write
+it or rasterize it.")
+
+(defun arche-diary--image-strippable-p (path)
+  "Return non-nil if PATH is an image format metadata is stripped from."
+  (let ((ext (file-name-extension path)))
+    (and ext (member (downcase ext) arche-diary--image-strip-extensions) t)))
+
+(defun arche-diary--image-strip-command ()
+  "Return the first installed metadata stripping command, or nil.
+The candidates are `arche-diary-html-strip-image-metadata-commands'
+and the value is one of its (PROGRAM ARGS...) elements."
+  (seq-find (lambda (cmd)
+              (and (consp cmd) (executable-find (car cmd))))
+            arche-diary-html-strip-image-metadata-commands))
+
+(defun arche-diary--strip-image-metadata (file)
+  "Strip FILE's metadata in place, returning non-nil on success.
+FILE must be a temporary copy, never a file the user owns — the
+stripping programs rewrite what they are given.  Return nil, with a
+message, when no stripping program is installed or the program
+fails; FILE is then left as it was."
+  (let ((cmd (arche-diary--image-strip-command)))
+    (if (not cmd)
+        (progn
+          (message "arche-diary: no metadata stripping program found (%s); exporting image unchanged"
+                   (mapconcat #'car
+                              arche-diary-html-strip-image-metadata-commands
+                              ", "))
+          nil)
+      (with-temp-buffer
+        (let ((status (apply #'call-process (car cmd) nil t nil
+                             (append (cdr cmd) (list file)))))
+          (or (eq status 0)
+              (progn
+                (message "arche-diary: %s failed (%s); exporting image unchanged%s"
+                         (car cmd) status
+                         (let ((out (string-trim (buffer-string))))
+                           (if (string-empty-p out) "" (concat ": " out))))
+                nil)))))))
+
+(defun arche-diary--stripped-image-temp-file (source)
+  "Return a temporary copy of SOURCE with its metadata stripped.
+SOURCE is never touched: it is copied to a temporary file (carrying
+SOURCE's extension, which the stripping programs dispatch on) and
+the program runs on that copy.  Return nil, having deleted the
+temporary file, when stripping is unavailable or fails — the caller
+then falls back to copying SOURCE as it is."
+  (let* ((ext (file-name-extension source))
+         (temp (make-temp-file "arche-diary-image-" nil
+                               (if ext (concat "." ext) "")))
+         (ok nil))
+    (unwind-protect
+        (progn
+          (copy-file source temp t)
+          (setq ok (arche-diary--strip-image-metadata temp))
+          (and ok temp))
+      (unless ok (delete-file temp)))))
+
+(defun arche-diary--copy-image-for-export (src dest)
+  "Copy SRC to DEST for publication, stripping DEST's metadata.
+The strip is governed by `arche-diary-html-strip-image-metadata'
+and skipped for formats outside `arche-diary--image-strip-extensions'.
+SRC is only ever read: the stripping program runs on a temporary
+copy, and what lands in DEST is that copy."
+  (let ((temp (and arche-diary-html-strip-image-metadata
+                   (arche-diary--image-strippable-p src)
+                   (arche-diary--stripped-image-temp-file src))))
+    (unwind-protect
+        (progn
+          (copy-file (or temp src) dest t)
+          ;; `copy-file' gives DEST the mode bits of the file it read,
+          ;; which for a temporary file are 0600 — unreadable to a web
+          ;; server.  Restore the bits a direct copy of SRC would have
+          ;; produced.
+          (when temp
+            (set-file-modes dest (logand (file-modes src)
+                                         (default-file-modes)))))
+      (when temp (delete-file temp)))))
 
 (defun arche-diary--enclosing-date-iso ()
   "Return the ISO date of the date heading point is under.
@@ -1090,6 +1214,10 @@ By default SOURCE is copied into `arche-diary-image-directory'
 heading point is under) and the copy is linked; with NO-COPY
 non-nil the original file is linked in place.
 
+Both keep their metadata: image metadata (EXIF, GPS, ...) is
+stripped at export, from the copy that goes into the html
+directory, under `arche-diary-html-strip-image-metadata'.
+
 With GALLERY non-nil the image block is placed inside a
 `#+begin_gallery' .. `#+end_gallery' wrapper, which the HTML
 export lays out as a wrapping horizontal row.  If point is
@@ -1206,7 +1334,12 @@ Images under `arche-diary-image-directory' keep their subtree."
   "Copy images linked from STR into the html dir.
 Return STR with those file links rewritten to paths relative to
 `arche-diary-html-directory' so the exported page is
-self-contained."
+self-contained.
+
+Every image a note links to passes through here — the diary's own
+copies as well as originals linked in place — which is why it is
+also where image metadata is stripped, via
+`arche-diary--copy-image-for-export'."
   (replace-regexp-in-string
    "\\[\\[file:\\([^]]+?\\)\\]\\(\\[[^]]*\\]\\)?\\]"
    (lambda (m)
@@ -1219,7 +1352,7 @@ self-contained."
                   (absdest (cdr d)))
              (make-directory (file-name-directory absdest) t)
              (unless (arche-diary--image-copy-current-p abs absdest)
-               (copy-file abs absdest t))
+               (arche-diary--copy-image-for-export abs absdest))
              (format "[[file:%s]%s]" reldest desc))
          m)))
    str t t))
