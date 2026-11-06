@@ -123,10 +123,12 @@ Stripping runs an external program — the first of
 | `magick mogrify -auto-orient -strip` | Same, for ImageMagick 7 without the compatibility symlinks. |
 
 The program never sees a file you own: the image is copied to a temporary file
-first and the program rewrites that copy. If none is installed, or the program
-fails, the image is published unchanged and a message says so — the export
-still succeeds — unless a copy that is still current exists, which is kept
-rather than replaced with the original. SVG is skipped (it is XML, which these
+first and the program rewrites that copy. An original is never published in
+place of a stripped copy: if an image needs stripping and no program is
+installed, the export stops with an error before anything can be uploaded, and
+if the program fails on one image, that image is left out with a warning. To
+publish images with their metadata instead, set
+`arche-diary-html-strip-image-metadata` to nil. SVG is skipped (it is XML, which these
 programs either refuse to write or rasterize). TIFF is only partly covered:
 exiftool removes its GPS data but cannot delete the tags in its main directory,
 such as camera make and model.
@@ -324,6 +326,35 @@ A working sample lives in [`examples/upload-diary`](examples/upload-diary)
 (credentials in `~/.netrc`, strict TLS verification on). See
 [`examples/README.md`](examples/README.md) for the quick-start and notes
 on adapting it to rsync-over-SSH or other targets.
+
+### Exporting from more than one machine
+
+Pages are rebuilt whole from the Org files, so exporting on another machine
+cannot publish an entry twice. The only record of what has been exported is the
+HTML folder itself: a plain export compares each month's Org file with its page
+by modification time. So share the HTML folder the same way you share the Org
+files. With Dropbox, for example, on the machine that already has the folder:
+
+```sh
+mkdir -p ~/Dropbox/www
+mv ~/www/diary ~/Dropbox/www/diary
+ln -s ~/Dropbox/www/diary ~/www/diary
+```
+
+On each other machine, replace its own `~/www/diary` with the same symlink. No
+setting has to change, because the path stays the same.
+
+- **Modification times must survive the sync.** Compare `stat -c %y` on one file
+  on both machines. If a copy gets a new time, the page looks newer than its
+  source and an unexported edit is silently skipped.
+- **Wait for the Org files to finish syncing before exporting**, or an older page
+  can replace a newer one.
+- **Every machine needs a current package and a stripping program.** Without a
+  program the export stops, which is safe; a build from before stripping existed
+  publishes the originals.
+- **Exports can publish immediately**, if the hook above uploads. The sample
+  script refuses to delete anything from the server unless told to, so a partial
+  folder can't wipe the site.
 
 ## Running tests
 

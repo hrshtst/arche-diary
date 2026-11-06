@@ -191,10 +191,12 @@ So an image published before stripping was available, or while it
 was off, stays as it is until a forced export writes it again (see
 `arche-diary-export-html').
 
-Stripping needs one of `arche-diary-html-strip-image-metadata-commands'
-to be installed; when none is found the image is copied unchanged
-and a message says so, unless a copy that is still current exists,
-which is then kept rather than replaced with the original."
+An original is never published in place of a stripped copy.  When
+an image needs stripping and none of
+`arche-diary-html-strip-image-metadata-commands' is installed, the
+export stops with an error, before `arche-diary-after-export-hook'
+can upload anything.  When the program fails on one image, that
+image is left out with a warning, and any older copy of it stays."
   :group 'arche-diary
   :type 'boolean)
 
@@ -946,35 +948,33 @@ and the value is one of its (PROGRAM ARGS...) elements."
 (defun arche-diary--strip-image-metadata (file)
   "Strip FILE's metadata in place, returning non-nil on success.
 FILE must be a temporary copy, never a file the user owns — the
-stripping programs rewrite what they are given.  Return nil, with a
-message, when no stripping program is installed or the program
-fails; FILE is then left as it was."
+stripping programs rewrite what they are given.  Signal a
+`user-error' when no stripping program is installed.  Return nil,
+with a message, when the program fails; FILE is then left as it was."
   (let ((cmd (arche-diary--image-strip-command)))
-    (if (not cmd)
-        (progn
-          (message "arche-diary: no metadata stripping program found (%s); image not stripped"
-                   (mapconcat #'car
-                              arche-diary-html-strip-image-metadata-commands
-                              ", "))
-          nil)
-      (with-temp-buffer
-        (let ((status (apply #'call-process (car cmd) nil t nil
-                             (append (cdr cmd) (list file)))))
-          (or (eq status 0)
-              (progn
-                (message "arche-diary: %s failed (%s); image not stripped%s"
-                         (car cmd) status
-                         (let ((out (string-trim (buffer-string))))
-                           (if (string-empty-p out) "" (concat ": " out))))
-                nil)))))))
+    (unless cmd
+      (user-error "No metadata stripping program found (%s); install one, or set `arche-diary-html-strip-image-metadata' to nil to publish images with their metadata"
+                  (mapconcat #'car
+                             arche-diary-html-strip-image-metadata-commands
+                             ", ")))
+    (with-temp-buffer
+      (let ((status (apply #'call-process (car cmd) nil t nil
+                           (append (cdr cmd) (list file)))))
+        (or (eq status 0)
+            (progn
+              (message "arche-diary: %s failed (%s); image not stripped%s"
+                       (car cmd) status
+                       (let ((out (string-trim (buffer-string))))
+                         (if (string-empty-p out) "" (concat ": " out))))
+              nil))))))
 
 (defun arche-diary--stripped-image-temp-file (source)
   "Return a temporary copy of SOURCE with its metadata stripped.
 SOURCE is never touched: it is copied to a temporary file (carrying
 SOURCE's extension, which the stripping programs dispatch on) and
 the program runs on that copy.  Return nil, having deleted the
-temporary file, when stripping is unavailable or fails — the caller
-then falls back to copying SOURCE as it is."
+temporary file, when the program fails.  With no program installed,
+the error from `arche-diary--strip-image-metadata' passes through."
   (let* ((ext (file-name-extension source))
          (temp (make-temp-file "arche-diary-image-" nil
                                (if ext (concat "." ext) "")))
@@ -993,26 +993,31 @@ and skipped for formats outside `arche-diary--image-strip-extensions'.
 SRC is only ever read: the stripping program runs on a temporary
 copy, and what lands in DEST is that copy.
 
-When stripping fails, SRC is copied as it is, unless DEST is still
-current.  A forced export gets here for such a DEST, which may well
-be a stripped copy, and SRC would put back the metadata it lost."
-  (let* ((strip (and arche-diary-html-strip-image-metadata
-                     (arche-diary--image-strippable-p src)))
-         (temp (and strip (arche-diary--stripped-image-temp-file src))))
-    (unwind-protect
-        (if (and strip (not temp)
-                 (arche-diary--image-copy-current-p src dest))
-            (message "arche-diary: kept the existing copy of %s"
-                     (file-name-nondirectory src))
-          (copy-file (or temp src) dest t)
-          ;; `copy-file' gives DEST the mode bits of the file it read,
-          ;; which for a temporary file are 0600 — unreadable to a web
-          ;; server.  Restore the bits a direct copy of SRC would have
-          ;; produced.
-          (when temp
-            (set-file-modes dest (logand (file-modes src)
-                                         (default-file-modes)))))
-      (when temp (delete-file temp)))))
+SRC never lands in DEST when it should have been stripped: that
+would publish its metadata, and whatever runs from
+`arche-diary-after-export-hook' may upload DEST straight away.  When
+the program fails, DEST is left as it is, with a warning; with no
+program installed, `arche-diary--strip-image-metadata' stops the
+export."
+  (if (not (and arche-diary-html-strip-image-metadata
+                (arche-diary--image-strippable-p src)))
+      (copy-file src dest t)
+    (let ((temp (arche-diary--stripped-image-temp-file src)))
+      (if (not temp)
+          (display-warning
+           'arche-diary
+           (format "Could not strip the metadata of %s, so this version of it was not published"
+                   src))
+        (unwind-protect
+            (progn
+              (copy-file temp dest t)
+              ;; `copy-file' gives DEST the mode bits of the file it read,
+              ;; which for a temporary file are 0600 — unreadable to a web
+              ;; server.  Restore the bits a direct copy of SRC would have
+              ;; produced.
+              (set-file-modes dest (logand (file-modes src)
+                                           (default-file-modes))))
+          (delete-file temp))))))
 
 (defun arche-diary--enclosing-date-iso ()
   "Return the ISO date of the date heading point is under.
@@ -1869,7 +1874,11 @@ month.  Any explicit MONTH (including `all') always rebuilds
 
 A forced export also writes the images of the months it exports
 again, which brings copies made before stripping was available, or
-while it was off, in line with `arche-diary-html-strip-image-metadata'."
+while it was off, in line with `arche-diary-html-strip-image-metadata'.
+
+If an image needs stripping and no stripping program is installed,
+the export stops with an error, without rebuilding `index.html' or
+running `arche-diary-after-export-hook'."
   (interactive
    (cond
     ((equal current-prefix-arg '(16)) (list 'all))

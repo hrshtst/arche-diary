@@ -44,8 +44,14 @@ DIARY_MIRROR_FLAGS="--dry-run --verbose --reverse --delete" \
                    (append '("DIARY_FTP_HOST=ftp.example.com"
                              "DIARY_FTP_REMOTE=/public_html/diary")
                            process-environment)))
-              (start-process "diary-upload" "*diary-upload*"
-                             (expand-file-name "~/bin/upload-diary")))))
+              (set-process-sentinel
+               (start-process "diary-upload" "*diary-upload*"
+                              (expand-file-name "~/bin/upload-diary"))
+               (lambda (proc _event)
+                 ;; Show the log if the upload failed or was refused.
+                 (when (and (eq (process-status proc) 'exit)
+                            (not (zerop (process-exit-status proc))))
+                   (display-buffer (process-buffer proc))))))))
 ```
 
 `start-process` runs asynchronously, so `M-x arche-diary-export-html`
@@ -58,8 +64,12 @@ returns immediately; watch `*diary-upload*` for progress.
   `ssl:verify-certificate` and `ssl:check-hostname` enabled; don't turn
   them off. For a self-signed host, pin the CA instead.
 - `ftp:ssl-force true` refuses any silent fallback to plain FTP.
-- `--delete` mirrors deletions: an empty/missing local `html/` will wipe
-  the remote. Always dry-run first.
+- `--delete` mirrors deletions, so a partial local folder would wipe what
+  it lacks from the remote. Exporting never removes anything from that
+  folder, so the script does a dry run first and refuses to transfer
+  anything if any file would be deleted. To delete on purpose, run it once
+  with `DIARY_ALLOW_DELETE=1`. The check can't see what the server holds if
+  the server can't be reached, but then the upload itself fails too.
 - Credentials live in `~/.netrc` (mode 600) — never inline in the script,
   on a command line, or in Emacs config.
 

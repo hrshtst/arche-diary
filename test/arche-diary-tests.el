@@ -23,6 +23,14 @@
 
 ;;;; Fixture
 
+;; The suite must not depend on exiftool or ImageMagick being installed,
+;; so the stripping command is a shell one-liner that rewrites the file
+;; it is handed (`sh -c SCRIPT FILE' passes FILE as $0).  It stands in
+;; for a real stripper: whatever it rewrites is what a real one would
+;; have rewritten, and whatever it leaves alone a real one never saw.
+(defconst arche-diary-tests--fake-strip-commands
+  '(("sh" "-c" "printf STRIPPED > \"$0\"")))
+
 (defmacro arche-diary-tests--with-dir (backend &rest body)
   "Run BODY with `arche-diary' configured for a fresh temporary directory.
 BACKEND is the value bound to `arche-diary-file-creation-system'."
@@ -30,7 +38,9 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
   `(let* ((tmpdir (make-temp-file "arche-diary-test-" 'directory))
           (arche-diary-directory tmpdir)
           (arche-diary-html-directory (expand-file-name "html" tmpdir))
-          (arche-diary-file-creation-system ,backend))
+          (arche-diary-file-creation-system ,backend)
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands))
      (unwind-protect
          (progn ,@body)
        (dolist (b (buffer-list))
@@ -863,14 +873,6 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
 
 ;;;; export-time image metadata stripping
 
-;; The suite must not depend on exiftool or ImageMagick being installed,
-;; so the stripping command is a shell one-liner that rewrites the file
-;; it is handed (`sh -c SCRIPT FILE' passes FILE as $0).  It stands in
-;; for a real stripper: whatever it rewrites is what a real one would
-;; have rewritten, and whatever it leaves alone a real one never saw.
-(defconst arche-diary-tests--fake-strip-commands
-  '(("sh" "-c" "printf STRIPPED > \"$0\"")))
-
 (defun arche-diary-tests--contents (path)
   "Return the contents of PATH as a string."
   (with-temp-buffer
@@ -996,39 +998,88 @@ either the diary's copy of SRC or SRC itself."
                                         arche-diary-html-directory))
                      "<svg/>")))))
 
-(ert-deftest arche-diary-tests/export-strip-failure-copies-unchanged ()
+(ert-deftest arche-diary-tests/export-strip-failure-leaves-image-out ()
   (arche-diary-tests--with-dir 'plain
     (let ((arche-diary-image-directory
            (expand-file-name "images" arche-diary-directory))
           (arche-diary-html-strip-image-metadata-commands '(("false")))
-          (src (expand-file-name "fail.jpg" tmpdir)))
+          (src (expand-file-name "fail.jpg" tmpdir))
+          (warnings nil))
       (with-temp-file src (insert "JPEGDATA"))
-      (arche-diary-tests--write-image-note src)
-      (should (equal (arche-diary-tests--contents
-                      (expand-file-name "images/2026-05-15/fail.jpg"
-                                        arche-diary-html-directory))
-                     "JPEGDATA")))))
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (_type message &rest _) (push message warnings))))
+        (arche-diary-tests--write-image-note src))
+      ;; The original is not published, and the warning names the image.
+      (should-not (file-exists-p
+                   (expand-file-name "images/2026-05-15/fail.jpg"
+                                     arche-diary-html-directory)))
+      (should (string-match-p "fail\\.jpg" (car warnings)))
+      ;; The rest of the export still completes.
+      (should (file-exists-p (expand-file-name "2026-05.html"
+                                               arche-diary-html-directory)))
+      (should (file-exists-p (expand-file-name "index.html"
+                                               arche-diary-html-directory))))))
 
-(ert-deftest arche-diary-tests/export-strip-without-program-copies-unchanged ()
+(ert-deftest arche-diary-tests/export-stops-without-strip-program ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((arche-diary-image-directory
+            (expand-file-name "images" arche-diary-directory))
+           (hook-ran nil)
+           (arche-diary-after-export-hook (list (lambda () (setq hook-ran t))))
+           (src (expand-file-name "none.jpg" tmpdir))
+           (html-copy (expand-file-name "images/2026-05-15/none.jpg"
+                                        arche-diary-html-directory)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (let ((arche-diary-html-strip-image-metadata-commands
+             '(("arche-diary-no-such-strip-program"))))
+        (should-error (arche-diary-tests--write-image-note src)
+                      :type 'user-error))
+      ;; Nothing was published, and the upload hook never ran.
+      (should-not (file-exists-p html-copy))
+      (should-not (file-exists-p (expand-file-name
+                                  "index.html" arche-diary-html-directory)))
+      (should-not hook-ran)
+      ;; With a stripper available, a plain export picks up where it stopped.
+      (arche-diary-export-html)
+      (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))
+      (should hook-ran))))
+
+(ert-deftest arche-diary-tests/export-needs-strip-program-only-for-new-images ()
   (arche-diary-tests--with-dir 'plain
     (let ((arche-diary-image-directory
            (expand-file-name "images" arche-diary-directory))
-          (arche-diary-html-strip-image-metadata-commands
-           '(("arche-diary-no-such-strip-program")))
-          (src (expand-file-name "none.jpg" tmpdir)))
+          (src (expand-file-name "old.jpg" tmpdir))
+          (svg (expand-file-name "vec.svg" tmpdir))
+          (page (expand-file-name "2026-05.html" arche-diary-html-directory)))
       (with-temp-file src (insert "JPEGDATA"))
+      (with-temp-file svg (insert "<svg/>"))
       (arche-diary-tests--write-image-note src)
-      (should (equal (arche-diary-tests--contents
-                      (expand-file-name "images/2026-05-15/none.jpg"
-                                        arche-diary-html-directory))
-                     "JPEGDATA")))))
+      (let ((arche-diary-html-strip-image-metadata-commands
+             '(("arche-diary-no-such-strip-program"))))
+        ;; A stale month whose image copy is current has nothing to strip...
+        (set-file-times page '(20000 0))
+        (arche-diary-export-html)
+        (should (time-less-p '(20000 0) (file-attribute-modification-time
+                                         (file-attributes page))))
+        ;; ...and an SVG is never stripped.
+        (with-current-buffer (arche-diary-open-month '(2026 5))
+          (goto-char (point-max))
+          (arche-diary-insert-image svg)
+          (save-buffer))
+        (arche-diary-export-html)
+        (should (file-exists-p (expand-file-name "images/2026-05-15/vec.svg"
+                                                 arche-diary-html-directory)))))))
 
 (ert-deftest arche-diary-tests/default-strip-command-keeps-only-orientation ()
   ;; The rest of the suite stubs the stripper.  This runs the real default
   ;; command where it is installed, since its flags decide what is published.
   (skip-unless (executable-find "exiftool"))
   (arche-diary-tests--with-dir 'plain
-    (let ((src (expand-file-name "shot.jpg" tmpdir))
+    (let ((arche-diary-html-strip-image-metadata-commands
+           (eval (car (get 'arche-diary-html-strip-image-metadata-commands
+                           'standard-value))
+                 t))
+          (src (expand-file-name "shot.jpg" tmpdir))
           (dest (expand-file-name "copy.jpg" tmpdir))
           (tags (lambda (file)
                   (with-temp-buffer
@@ -1135,15 +1186,95 @@ either the diary's copy of SRC or SRC itself."
       (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))
       ;; Without a working stripper, the original must not replace the
       ;; clean copy: that would publish the metadata it was stripped of.
-      (dolist (commands '((("false")) (("arche-diary-no-such-strip-program"))))
-        (let ((arche-diary-html-strip-image-metadata-commands commands))
-          (arche-diary-export-html '(2026 5))
-          (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))
-      ;; An out-of-date copy is still replaced, with the original as before.
+      (let ((arche-diary-html-strip-image-metadata-commands '(("false"))))
+        (arche-diary-export-html '(2026 5))
+        (should (equal (arche-diary-tests--contents html-copy) "STRIPPED")))
+      (let ((arche-diary-html-strip-image-metadata-commands
+             '(("arche-diary-no-such-strip-program"))))
+        (should-error (arche-diary-export-html '(2026 5)) :type 'user-error)
+        (should (equal (arche-diary-tests--contents html-copy) "STRIPPED")))
+      ;; Not even when the copy is out of date.
       (set-file-times html-copy '(20000 0))
       (let ((arche-diary-html-strip-image-metadata-commands '(("false"))))
         (arche-diary-export-html '(2026 5))
-        (should (equal (arche-diary-tests--contents html-copy) "JPEGDATA"))))))
+        (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))))
+
+;;;; examples/upload-diary
+
+(defconst arche-diary-tests--upload-script
+  (expand-file-name "../examples/upload-diary"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The sample deploy script, tested against a `file://' fake server.")
+
+(defun arche-diary-tests--run-upload (local remote &rest env)
+  "Run the upload script from LOCAL to REMOTE with extra ENV strings.
+Return (EXIT-STATUS . OUTPUT)."
+  (let ((process-environment
+         (append (list "DIARY_FTP_HOST=file:///"
+                       (concat "DIARY_FTP_REMOTE=" remote)
+                       (concat "ARCHE_DIARY_HTML_DIR=" local))
+                 env
+                 process-environment)))
+    (with-temp-buffer
+      (let ((status (call-process "sh" nil t nil
+                                  arche-diary-tests--upload-script)))
+        (cons status (buffer-string))))))
+
+(defun arche-diary-tests--write-site (dir mtime &rest files)
+  "Create DIR holding FILES, each containing MTIME's number, dated MTIME."
+  (make-directory dir t)
+  (dolist (f files)
+    (let ((path (expand-file-name f dir)))
+      (with-temp-file path (insert (format "%S" mtime)))
+      (set-file-times path mtime))))
+
+(ert-deftest arche-diary-tests/upload-refuses-to-delete-by-default ()
+  (skip-unless (executable-find "lftp"))
+  (arche-diary-tests--with-dir 'plain
+    (let ((local (expand-file-name "local" tmpdir))
+          (remote (expand-file-name "remote" tmpdir)))
+      ;; A partial local folder: what a single-month export leaves on a
+      ;; machine whose html directory was empty.
+      (arche-diary-tests--write-site remote '(20000 0)
+                                     "2026-05.html" "2026-10.html" "index.html")
+      (arche-diary-tests--write-site local '(20001 0)
+                                     "2026-10.html" "index.html")
+      ;; Refused, naming what it would delete, with nothing transferred.
+      (let ((result (arche-diary-tests--run-upload local remote)))
+        (should-not (zerop (car result)))
+        (should (string-match-p "2026-05\\.html" (cdr result))))
+      (should (file-exists-p (expand-file-name "2026-05.html" remote)))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "index.html" remote))
+                     "(20000 0)"))
+      ;; A dry run is always allowed: it deletes nothing.
+      (let ((result (arche-diary-tests--run-upload
+                     local remote
+                     "DIARY_MIRROR_FLAGS=--dry-run --reverse --delete")))
+        (should (zerop (car result))))
+      (should (file-exists-p (expand-file-name "2026-05.html" remote)))
+      ;; Asked for explicitly, the deletion goes ahead.
+      (let ((result (arche-diary-tests--run-upload
+                     local remote "DIARY_ALLOW_DELETE=1")))
+        (should (zerop (car result))))
+      (should-not (file-exists-p (expand-file-name "2026-05.html" remote)))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "index.html" remote))
+                     "(20001 0)")))))
+
+(ert-deftest arche-diary-tests/upload-proceeds-when-nothing-would-be-deleted ()
+  (skip-unless (executable-find "lftp"))
+  (arche-diary-tests--with-dir 'plain
+    (let ((local (expand-file-name "local" tmpdir))
+          (remote (expand-file-name "remote" tmpdir)))
+      (arche-diary-tests--write-site remote '(20000 0) "2026-10.html")
+      (arche-diary-tests--write-site local '(20001 0)
+                                     "2026-10.html" "index.html")
+      (should (zerop (car (arche-diary-tests--run-upload local remote))))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "2026-10.html" remote))
+                     "(20001 0)"))
+      (should (file-exists-p (expand-file-name "index.html" remote))))))
 
 (ert-deftest arche-diary-tests/image-copy-current-p-ignores-size ()
   (arche-diary-tests--with-dir 'plain

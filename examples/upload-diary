@@ -32,8 +32,14 @@
 #                      (append '("DIARY_FTP_HOST=ftp.example.com"
 #                                "DIARY_FTP_REMOTE=/public_html/diary")
 #                              process-environment)))
-#                 (start-process "diary-upload" "*diary-upload*"
-#                                (expand-file-name "~/bin/upload-diary")))))
+#                 (set-process-sentinel
+#                  (start-process "diary-upload" "*diary-upload*"
+#                                 (expand-file-name "~/bin/upload-diary"))
+#                  (lambda (proc _event)
+#                    ;; Show the log if the upload failed or was refused.
+#                    (when (and (eq (process-status proc) 'exit)
+#                               (not (zerop (process-exit-status proc))))
+#                      (display-buffer (process-buffer proc))))))))
 #
 # `start-process' runs async, so Emacs doesn't block.  Watch progress
 # in the *diary-upload* buffer.
@@ -47,9 +53,12 @@
 #   into "encrypted but unauthenticated," which is barely better than
 #   plain FTP.  For a self-signed host, fetch the cert once and pin it
 #   with `set ssl:ca-file /path/to/ca.pem' instead of disabling checks.
-# - `--delete' makes the remote a strict mirror of LOCAL: if the local
-#   directory is empty or missing, the remote will be wiped.  Run with
-#   `--dry-run' the first time (see DIARY_MIRROR_FLAGS below).
+# - `--delete' makes the remote a strict mirror of LOCAL, so a partial
+#   LOCAL would wipe what it lacks from the remote.  Exporting never
+#   removes anything from LOCAL, so a planned deletion means LOCAL lost
+#   something: this script checks with a dry run first, and refuses to
+#   transfer anything if any file would be deleted.  To delete on
+#   purpose, run it once with DIARY_ALLOW_DELETE=1.
 
 set -eu
 
@@ -66,7 +75,8 @@ if [ ! -d "$LOCAL" ]; then
     exit 1
 fi
 
-exec lftp -c "
+run_mirror() {
+    lftp -c "
   set ftp:ssl-force              true
   set ftp:ssl-protect-data       true
   set ssl:verify-certificate     yes
@@ -75,6 +85,27 @@ exec lftp -c "
   set net:timeout                20
   set net:reconnect-interval-base 5
   open ${HOST}
-  mirror ${MIRROR_FLAGS} '${LOCAL}/' '${REMOTE}/'
+  mirror $* '${LOCAL}/' '${REMOTE}/'
   bye
 "
+}
+
+case " ${MIRROR_FLAGS} " in
+    *" --dry-run "*) ;;
+    *" --delete "*)
+        if [ "${DIARY_ALLOW_DELETE:-}" != 1 ]; then
+            plan=$(run_mirror --dry-run "${MIRROR_FLAGS}")
+            deletions=$(printf '%s\n' "$plan" | grep '^rm ' || true)
+            if [ -n "$deletions" ]; then
+                {
+                    echo "upload-diary: refusing to delete from the remote; nothing was transferred:"
+                    printf '%s\n' "$deletions"
+                    echo "upload-diary: if this is intended, run again with DIARY_ALLOW_DELETE=1."
+                } >&2
+                exit 1
+            fi
+        fi
+        ;;
+esac
+
+run_mirror "${MIRROR_FLAGS}"
