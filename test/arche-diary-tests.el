@@ -1066,6 +1066,7 @@ either the diary's copy of SRC or SRC itself."
           (goto-char (point-max))
           (arche-diary-insert-image svg)
           (save-buffer))
+        (set-file-times page '(20000 0))
         (arche-diary-export-html)
         (should (file-exists-p (expand-file-name "images/2026-05-15/vec.svg"
                                                  arche-diary-html-directory)))))))
