@@ -354,6 +354,7 @@ To run the suite by hand without `make`:
 
 ```sh
 emacs -Q --batch \
+  --eval '(setq load-prefer-newer t)' \
   -L . -L test \
   -L ~/.emacs.d/straight/build/denote \
   -L ~/.emacs.d/straight/build/org \

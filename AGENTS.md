@@ -12,12 +12,12 @@ make clean      # remove *.elc
 
 The Makefile expects denote and org under `~/.emacs.d/straight/build/{denote,org}`. Override with `DENOTE_DIR=...` / `ORG_DIR=...` / `EMACS=...` if needed.
 
-A stale `arche-diary.elc` is loaded in preference to the source (Emacs only warns "using older file"), so edits can appear to pass. Run `make clean` after `make compile`, before testing.
+By default Emacs loads a stale `arche-diary.elc` in preference to the source (it only warns "using older file"), so edits can appear to pass. `make test` and the command below set `load-prefer-newer` to rule that out; any other batch run that loads the package needs the same.
 
 Run a single test:
 
 ```sh
-emacs -Q --batch -L . -L test \
+emacs -Q --batch --eval '(setq load-prefer-newer t)' -L . -L test \
   -L ~/.emacs.d/straight/build/denote \
   -L ~/.emacs.d/straight/build/org \
   -l test/arche-diary-tests.el \

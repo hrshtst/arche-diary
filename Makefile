@@ -16,6 +16,7 @@ all: compile
 
 test:
 	$(EMACS) -Q --batch $(LOAD_PATH) \
+		--eval '(setq load-prefer-newer t)' \
 		-l test/arche-diary-tests.el \
 		-f ert-run-tests-batch-and-exit
 
