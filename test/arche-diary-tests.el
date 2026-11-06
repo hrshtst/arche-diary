@@ -928,6 +928,102 @@ either the diary's copy of SRC or SRC itself."
                                         arche-diary-html-directory))
                      "JPEGDATA")))))
 
+(ert-deftest arche-diary-tests/forced-export-recopies-current-image ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "late.jpg" tmpdir))
+          (html-copy (expand-file-name "images/2026-05-15/late.jpg"
+                                       arche-diary-html-directory)))
+      (with-temp-file src (insert "JPEGDATA"))
+      ;; Published without stripping: the copy looks current, but isn't clean.
+      (let ((arche-diary-html-strip-image-metadata nil))
+        (arche-diary-tests--write-image-note src))
+      (should (equal (arche-diary-tests--contents html-copy) "JPEGDATA"))
+      ;; A no-arg export has nothing to do, so it can't fix that...
+      (arche-diary-export-html)
+      (should (equal (arche-diary-tests--contents html-copy) "JPEGDATA"))
+      ;; ...but forcing the month writes the image again.
+      (arche-diary-export-html '(2026 5))
+      (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))
+      ;; So does forcing every month.
+      (with-temp-file html-copy (insert "JPEGDATA"))
+      (arche-diary-export-html 'all)
+      (should (equal (arche-diary-tests--contents html-copy) "STRIPPED")))))
+
+(ert-deftest arche-diary-tests/incremental-export-keeps-current-image ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "kept.jpg" tmpdir))
+          (html-copy (expand-file-name "images/2026-05-15/kept.jpg"
+                                       arche-diary-html-directory)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (let ((arche-diary-html-strip-image-metadata nil))
+        (arche-diary-tests--write-image-note src))
+      ;; The month is stale and gets rendered, but its image is not touched.
+      (set-file-times (expand-file-name "2026-05.html"
+                                        arche-diary-html-directory)
+                      '(20000 0))
+      (arche-diary-export-html)
+      (should (equal (arche-diary-tests--contents html-copy) "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/forced-month-export-leaves-other-months-images ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (arche-diary-html-index-recent-count 2)
+          (src (expand-file-name "both.jpg" tmpdir)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (let ((arche-diary-html-strip-image-metadata nil))
+        (with-current-buffer (arche-diary-open-month '(2026 4))
+          (arche-diary-add-date "15")
+          (goto-char (point-max))
+          (insert "** photo\n")
+          (arche-diary-insert-image src)
+          (save-buffer))
+        (arche-diary-tests--write-image-note src))
+      ;; Forcing May also rebuilds index.html, which reads April too.
+      (arche-diary-export-html '(2026 5))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/both.jpg"
+                                        arche-diary-html-directory))
+                     "STRIPPED"))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-04-15/both.jpg"
+                                        arche-diary-html-directory))
+                     "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/forced-export-keeps-copy-when-strip-fails ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-html-strip-image-metadata-commands
+           arche-diary-tests--fake-strip-commands)
+          (src (expand-file-name "clean.jpg" tmpdir))
+          (html-copy (expand-file-name "images/2026-05-15/clean.jpg"
+                                       arche-diary-html-directory)))
+      (with-temp-file src (insert "JPEGDATA"))
+      (arche-diary-tests--write-image-note src)
+      (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))
+      ;; Without a working stripper, the original must not replace the
+      ;; clean copy: that would publish the metadata it was stripped of.
+      (dolist (commands '((("false")) (("arche-diary-no-such-strip-program"))))
+        (let ((arche-diary-html-strip-image-metadata-commands commands))
+          (arche-diary-export-html '(2026 5))
+          (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))
+      ;; An out-of-date copy is still replaced, with the original as before.
+      (set-file-times html-copy '(20000 0))
+      (let ((arche-diary-html-strip-image-metadata-commands '(("false"))))
+        (arche-diary-export-html '(2026 5))
+        (should (equal (arche-diary-tests--contents html-copy) "JPEGDATA"))))))
+
 (ert-deftest arche-diary-tests/image-copy-current-p-ignores-size ()
   (arche-diary-tests--with-dir 'plain
     (let ((src (expand-file-name "src.jpg" tmpdir))

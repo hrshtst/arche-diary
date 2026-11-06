@@ -185,14 +185,21 @@ nor the diary's own copy under `arche-diary-image-directory' is
 modified: those keep their metadata, so the diary stays a faithful
 archive while what is published does not.
 
+A copy is only stripped when it is written, and an export without
+an argument leaves alone any copy that is not older than its source.
+So an image published before stripping was available, or while it
+was off, stays as it is until a forced export writes it again (see
+`arche-diary-export-html').
+
 Stripping needs one of `arche-diary-html-strip-image-metadata-commands'
 to be installed; when none is found the image is copied unchanged
-and a message says so."
+and a message says so, unless a copy that is still current exists,
+which is then kept rather than replaced with the original."
   :group 'arche-diary
   :type 'boolean)
 
 (defcustom arche-diary-html-strip-image-metadata-commands
-  '(("exiftool" "-quiet" "-all=" "-overwrite_original")
+  '(("exiftool" "-quiet" "-all=" "--icc_profile:all" "-overwrite_original")
     ("mogrify" "-strip")
     ("magick" "mogrify" "-strip"))
   "Candidate commands that strip an image file's metadata in place.
@@ -204,7 +211,12 @@ The default prefers exiftool because it rewrites only the metadata
 segments, whereas ImageMagick's `mogrify -strip' re-encodes the
 image data (recompressing a JPEG).  Neither is ever pointed at a
 file the user owns: the export copies the image to a temporary file
-first and runs the command on that copy."
+first and runs the command on that copy.
+
+The exiftool entry keeps the ICC color profile: without it a
+wide-gamut photograph looks duller, and the profile says nothing
+about the photograph, at most naming the company that made it.
+ImageMagick's `-strip' removes the profile as well."
   :group 'arche-diary
   :type '(repeat (repeat :tag "Command" string)))
 
@@ -935,7 +947,7 @@ fails; FILE is then left as it was."
   (let ((cmd (arche-diary--image-strip-command)))
     (if (not cmd)
         (progn
-          (message "arche-diary: no metadata stripping program found (%s); exporting image unchanged"
+          (message "arche-diary: no metadata stripping program found (%s); image not stripped"
                    (mapconcat #'car
                               arche-diary-html-strip-image-metadata-commands
                               ", "))
@@ -945,7 +957,7 @@ fails; FILE is then left as it was."
                              (append (cdr cmd) (list file)))))
           (or (eq status 0)
               (progn
-                (message "arche-diary: %s failed (%s); exporting image unchanged%s"
+                (message "arche-diary: %s failed (%s); image not stripped%s"
                          (car cmd) status
                          (let ((out (string-trim (buffer-string))))
                            (if (string-empty-p out) "" (concat ": " out))))
@@ -974,12 +986,19 @@ then falls back to copying SOURCE as it is."
 The strip is governed by `arche-diary-html-strip-image-metadata'
 and skipped for formats outside `arche-diary--image-strip-extensions'.
 SRC is only ever read: the stripping program runs on a temporary
-copy, and what lands in DEST is that copy."
-  (let ((temp (and arche-diary-html-strip-image-metadata
-                   (arche-diary--image-strippable-p src)
-                   (arche-diary--stripped-image-temp-file src))))
+copy, and what lands in DEST is that copy.
+
+When stripping fails, SRC is copied as it is, unless DEST is still
+current.  A forced export gets here for such a DEST, which may well
+be a stripped copy, and SRC would put back the metadata it lost."
+  (let* ((strip (and arche-diary-html-strip-image-metadata
+                     (arche-diary--image-strippable-p src)))
+         (temp (and strip (arche-diary--stripped-image-temp-file src))))
     (unwind-protect
-        (progn
+        (if (and strip (not temp)
+                 (arche-diary--image-copy-current-p src dest))
+            (message "arche-diary: kept the existing copy of %s"
+                     (file-name-nondirectory src))
           (copy-file (or temp src) dest t)
           ;; `copy-file' gives DEST the mode bits of the file it read,
           ;; which for a temporary file are 0600 — unreadable to a web
@@ -1343,6 +1362,13 @@ image's copy as current for the other."
                 (concat sub (arche-diary--hashed-image-name abs)))))
     (cons rel (expand-file-name rel (arche-diary--html-directory)))))
 
+(defvar arche-diary--force-image-copy nil
+  "Non-nil to copy images into the html dir even if their copies look current.
+Bound while a forced export renders the months it was asked for.
+Modification times cannot show whether a copy was stripped, so this
+is the only way to bring an existing copy in line with the current
+stripping settings.")
+
 (defun arche-diary--rewrite-image-links-for-export (str)
   "Copy images linked from STR into the html dir.
 Return STR with those file links rewritten to paths relative to
@@ -1352,7 +1378,8 @@ self-contained.
 Every image a note links to passes through here — the diary's own
 copies as well as originals linked in place — which is why it is
 also where image metadata is stripped, via
-`arche-diary--copy-image-for-export'."
+`arche-diary--copy-image-for-export'.  An up-to-date copy is left
+alone unless `arche-diary--force-image-copy' is non-nil."
   (replace-regexp-in-string
    "\\[\\[file:\\([^]]+?\\)\\]\\(\\[[^]]*\\]\\)?\\]"
    (lambda (m)
@@ -1364,7 +1391,8 @@ also where image metadata is stripped, via
                   (reldest (car d))
                   (absdest (cdr d)))
              (make-directory (file-name-directory absdest) t)
-             (unless (arche-diary--image-copy-current-p abs absdest)
+             (when (or arche-diary--force-image-copy
+                       (not (arche-diary--image-copy-current-p abs absdest)))
                (arche-diary--copy-image-for-export abs absdest))
              (format "[[file:%s]%s]" reldest desc))
          m)))
@@ -1799,7 +1827,11 @@ With a prefix argument, prompt for MONTH and force-export it.
 With a double prefix argument \(\\[universal-argument]
 \\[universal-argument]) or MONTH = `all', force-export every
 month.  Any explicit MONTH (including `all') always rebuilds
-`index.html' and runs `arche-diary-after-export-hook'."
+`index.html' and runs `arche-diary-after-export-hook'.
+
+A forced export also writes the images of the months it exports
+again, which brings copies made before stripping was available, or
+while it was off, in line with `arche-diary-html-strip-image-metadata'."
   (interactive
    (cond
     ((equal current-prefix-arg '(16)) (list 'all))
@@ -1819,8 +1851,9 @@ month.  Any explicit MONTH (including `all') always rebuilds
                            (arche-diary--html-directory)))))
       (cond
        ((eq month 'all)
-        (dolist (entry (arche-diary--find-or-list-month-files))
-          (arche-diary--render-month-html (nth 0 entry) (nth 1 entry)))
+        (let ((arche-diary--force-image-copy t))
+          (dolist (entry (arche-diary--find-or-list-month-files))
+            (arche-diary--render-month-html (nth 0 entry) (nth 1 entry))))
         (finish))
        ((null month)
         (let ((stale (cl-remove-if-not
@@ -1835,7 +1868,8 @@ month.  Any explicit MONTH (including `all') always rebuilds
             (finish (length stale)))))
        (t
         (pcase-let ((`(,y . ,m) (arche-diary--parse-month month)))
-          (arche-diary--render-month-html y m))
+          (let ((arche-diary--force-image-copy t))
+            (arche-diary--render-month-html y m)))
         (finish))))))
 
 

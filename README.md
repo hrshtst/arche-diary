@@ -43,7 +43,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-visit-date` | Open the appropriate month and put point at a date heading (creating both if missing). |
 | `arche-diary-fill-dates` | Insert headings for every day in a range. |
 | `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
-| `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. |
+| `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. Forcing also writes those months' images again. |
 
 ### Accepted argument formats
 
@@ -118,15 +118,29 @@ Stripping runs an external program — the first of
 
 | Program | Notes |
 | --- | --- |
-| `exiftool -all= -overwrite_original` | Preferred: rewrites only the metadata segments, leaving the image data untouched. |
-| `mogrify -strip` (ImageMagick) | Fallback; re-encodes the image data, so a JPEG is recompressed. |
+| `exiftool -all= --icc_profile:all -overwrite_original` | Preferred: rewrites only the metadata segments, leaving the image data untouched, and keeps the color profile. |
+| `mogrify -strip` (ImageMagick) | Fallback; re-encodes the image data, so a JPEG is recompressed, and removes the color profile too. |
 | `magick mogrify -strip` | Same, for ImageMagick 7 without the compatibility symlinks. |
 
 The program never sees a file you own: the image is copied to a temporary file
 first and the program rewrites that copy. If none is installed, or the program
 fails, the image is published unchanged and a message says so — the export
-still succeeds. SVG is skipped (it is XML, which these programs either refuse
-to write or rasterize).
+still succeeds — unless a copy that is still current exists, which is kept
+rather than replaced with the original. SVG is skipped (it is XML, which these
+programs either refuse to write or rasterize). TIFF is only partly covered:
+exiftool removes its GPS data but cannot delete the tags in its main directory,
+such as camera make and model.
+
+The color profile is kept because without it a wide-gamut photo, such as a
+phone's Display P3, looks duller. It says nothing about the photo itself, though
+it can name the company that made the profile (Google, on a Pixel). To remove it
+as well, drop `--icc_profile:all` from the command.
+
+A copy is only stripped when it is written, and a plain export leaves alone any
+copy that is not older than its source. So an image published before stripping
+was available, or while it was off, keeps its metadata until you force an
+export: `C-u C-u M-x arche-diary-export-html` writes every month's images again
+(`C-u` does one month). Upload the result afterwards.
 
 #### Multiple images in a row (galleries)
 
