@@ -1524,19 +1524,22 @@ either the diary's copy of SRC or SRC itself."
           ;; Missing destination is never current.
           (with-temp-file src (insert "PNG-CONTENT"))
           (should-not (arche-diary--image-copy-current-p src dest))
-          ;; A same-size copy made now (mtime >= src) is current.
+          ;; A copy that is not older than its source is current, so equal
+          ;; mtimes count.  Each mtime is set: writes made in the same clock
+          ;; tick would get equal ones.
           (copy-file src dest t)
+          (set-file-times src '(100 0))
+          (set-file-times dest '(200 0))
           (should (arche-diary--image-copy-current-p src dest))
-          ;; A size change makes it stale even if the copy is newer.
-          (with-temp-file src (insert "PNG-CONTENT-LONGER"))
-          (should-not (arche-diary--image-copy-current-p src dest))
-          ;; Re-copy restores currency.
-          (copy-file src dest t)
-          (should (arche-diary--image-copy-current-p src dest))
-          ;; A source touched newer than the copy is stale (same size).
-          (set-file-times dest '(100 0))
           (set-file-times src '(200 0))
-          (should-not (arche-diary--image-copy-current-p src dest)))
+          (should (arche-diary--image-copy-current-p src dest))
+          ;; An edited source, newer than the copy, makes it stale.
+          (with-temp-file src (insert "PNG-CONTENT-EDITED"))
+          (set-file-times src '(300 0))
+          (should-not (arche-diary--image-copy-current-p src dest))
+          ;; Copying it again restores currency.
+          (copy-file src dest t)
+          (should (arche-diary--image-copy-current-p src dest)))
       (delete-directory dir 'recursive))))
 
 (ert-deftest arche-diary-tests/export-caches-suppress-org-modules ()
