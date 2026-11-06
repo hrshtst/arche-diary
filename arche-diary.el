@@ -199,9 +199,10 @@ which is then kept rather than replaced with the original."
   :type 'boolean)
 
 (defcustom arche-diary-html-strip-image-metadata-commands
-  '(("exiftool" "-quiet" "-all=" "--icc_profile:all" "-overwrite_original")
-    ("mogrify" "-strip")
-    ("magick" "mogrify" "-strip"))
+  '(("exiftool" "-quiet" "-all=" "--icc_profile:all"
+     "-tagsfromfile" "@" "-Orientation" "-overwrite_original")
+    ("mogrify" "-auto-orient" "-strip")
+    ("magick" "mogrify" "-auto-orient" "-strip"))
   "Candidate commands that strip an image file's metadata in place.
 Each element is a list (PROGRAM ARGS...).  The first PROGRAM found
 in `exec-path' is used, with the file to strip appended as the
@@ -213,10 +214,14 @@ image data (recompressing a JPEG).  Neither is ever pointed at a
 file the user owns: the export copies the image to a temporary file
 first and runs the command on that copy.
 
-The exiftool entry keeps the ICC color profile: without it a
+The exiftool entry keeps the two things a browser needs to show the
+image as intended.  One is the ICC color profile: without it a
 wide-gamut photograph looks duller, and the profile says nothing
-about the photograph, at most naming the company that made it.
-ImageMagick's `-strip' removes the profile as well."
+about the photograph, at most naming the company that made it.  The
+other is the orientation tag: a photograph stored on its side relies
+on it to display upright.  ImageMagick's `-strip' removes both, so
+those entries first apply the rotation to the image data with
+`-auto-orient', and the color profile is lost."
   :group 'arche-diary
   :type '(repeat (repeat :tag "Command" string)))
 

@@ -118,9 +118,9 @@ Stripping runs an external program — the first of
 
 | Program | Notes |
 | --- | --- |
-| `exiftool -all= --icc_profile:all -overwrite_original` | Preferred: rewrites only the metadata segments, leaving the image data untouched, and keeps the color profile. |
-| `mogrify -strip` (ImageMagick) | Fallback; re-encodes the image data, so a JPEG is recompressed, and removes the color profile too. |
-| `magick mogrify -strip` | Same, for ImageMagick 7 without the compatibility symlinks. |
+| `exiftool -all= --icc_profile:all -tagsfromfile @ -Orientation -overwrite_original` | Preferred: rewrites only the metadata segments, leaving the image data untouched, and keeps the color profile and rotation tag. |
+| `mogrify -auto-orient -strip` (ImageMagick) | Fallback; re-encodes the image data, so a JPEG is recompressed. Applies any rotation to the image itself and removes the color profile. |
+| `magick mogrify -auto-orient -strip` | Same, for ImageMagick 7 without the compatibility symlinks. |
 
 The program never sees a file you own: the image is copied to a temporary file
 first and the program rewrites that copy. If none is installed, or the program
@@ -134,7 +134,8 @@ such as camera make and model.
 The color profile is kept because without it a wide-gamut photo, such as a
 phone's Display P3, looks duller. It says nothing about the photo itself, though
 it can name the company that made the profile (Google, on a Pixel). To remove it
-as well, drop `--icc_profile:all` from the command.
+as well, drop `--icc_profile:all` from the command. The rotation tag is kept
+because a photo stored on its side relies on it to display upright.
 
 A copy is only stripped when it is written, and a plain export leaves alone any
 copy that is not older than its source. So an image published before stripping

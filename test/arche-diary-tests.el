@@ -1023,6 +1023,32 @@ either the diary's copy of SRC or SRC itself."
                                         arche-diary-html-directory))
                      "JPEGDATA")))))
 
+(ert-deftest arche-diary-tests/default-strip-command-keeps-only-orientation ()
+  ;; The rest of the suite stubs the stripper.  This runs the real default
+  ;; command where it is installed, since its flags decide what is published.
+  (skip-unless (executable-find "exiftool"))
+  (arche-diary-tests--with-dir 'plain
+    (let ((src (expand-file-name "shot.jpg" tmpdir))
+          (dest (expand-file-name "copy.jpg" tmpdir))
+          (tags (lambda (file)
+                  (with-temp-buffer
+                    (call-process "exiftool" nil t nil "-s" "-G1" file)
+                    (buffer-string)))))
+      ;; The smallest JPEG exiftool accepts: start, scan and end markers.
+      (let ((coding-system-for-write 'binary))
+        (write-region (unibyte-string #xFF #xD8 #xFF #xDA #x00 #x02 #xFF #xD9)
+                      nil src nil 'silent))
+      (should (zerop (call-process "exiftool" nil nil nil "-q" "-q"
+                                   "-overwrite_original" "-Orientation#=6"
+                                   "-Make=TESTCAM" "-GPSLatitude=35"
+                                   "-GPSLatitudeRef=N" src)))
+      (should (string-match-p "GPSLatitude" (funcall tags src)))
+      (arche-diary--copy-image-for-export src dest)
+      (let ((left (funcall tags dest)))
+        (should (string-match-p "Orientation +: Rotate 90 CW" left))
+        (should-not (string-match-p "GPS\\|TESTCAM" left)))
+      (should (string-match-p "TESTCAM" (funcall tags src))))))
+
 (ert-deftest arche-diary-tests/forced-export-recopies-current-image ()
   (arche-diary-tests--with-dir 'plain
     (let ((arche-diary-image-directory
