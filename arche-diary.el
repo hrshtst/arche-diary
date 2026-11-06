@@ -165,6 +165,16 @@ so they keep opening in place."
   :group 'arche-diary
   :type 'boolean)
 
+(defcustom arche-diary-html-mathjax-url
+  "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+  "URL of the MathJax script that displays LaTeX math in the browser.
+The export adds it only to pages with math on them, so other pages
+stay free of scripts.  A reader's browser fetches it from that
+server; to avoid the third party, host a copy and point this at it.
+With nil no script is added, and math shows as its LaTeX source."
+  :group 'arche-diary
+  :type '(choice (const :tag "Do not load MathJax" nil) string))
+
 (defcustom arche-diary-html-links-separator " | "
   "String placed between consecutive links in the header link list.
 Inserted verbatim between the rendered `<a>' elements, so it can
@@ -1564,12 +1574,27 @@ hard line break keeps its newline."
        (t (push line acc))))
     (mapconcat #'identity (nreverse acc) "\n")))
 
+(defun arche-diary--escape-math-for-html (math _backend _info)
+  "Return LaTeX MATH with HTML-significant characters escaped.
+An Org export filter.  Org passes math through for MathJax as it is,
+so a browser would read the `<b' of `a<b' as the start of a tag.
+Escaped, the browser decodes it and MathJax sees the original."
+  (arche-diary--html-escape math))
+
 (defun arche-diary--org-string-to-html (str)
   "Render Org-formatted STR to an HTML fragment (body only).
 Hard-wrapped CJK lines are folded (see `arche-diary-html-unfill-cjk'),
-and image file links are copied into the html directory and
-rewritten so the exported page can resolve them."
-  (let* ((org-export-with-toc nil)
+image file links are copied into the html directory and rewritten so
+the exported page can resolve them, and math is left for MathJax (see
+`arche-diary-html-mathjax-url') whatever `org-html-with-latex' says."
+  (let* ((org-html-with-latex 'mathjax)
+         (org-export-filter-latex-fragment-functions
+          (append org-export-filter-latex-fragment-functions
+                  (list #'arche-diary--escape-math-for-html)))
+         (org-export-filter-latex-environment-functions
+          (append org-export-filter-latex-environment-functions
+                  (list #'arche-diary--escape-math-for-html)))
+         (org-export-with-toc nil)
          (org-export-with-section-numbers nil)
          (org-export-with-broken-links t)
          (org-export-with-author nil)
@@ -1757,6 +1782,21 @@ left untouched."
        tag))
    html t t))
 
+(defconst arche-diary--html-math-regexp "\\\\(\\|\\\\\\[\\|\\\\begin{"
+  "Regexp matching where LaTeX math starts in exported HTML.
+A match inside a code block only loads a script that has nothing to
+do: MathJax skips those.")
+
+(defun arche-diary--html-mathjax-script (body)
+  "Return the tag loading MathJax if BODY contains math, else \"\".
+Org's own document template would load it, but the pages are assembled
+here from body-only exports, so nothing else does."
+  (if (and arche-diary-html-mathjax-url
+           (string-match-p arche-diary--html-math-regexp body))
+      (format "<script async src=\"%s\"></script>\n"
+              (arche-diary--html-escape arche-diary-html-mathjax-url))
+    ""))
+
 (defun arche-diary--html-document (title nav links body)
   "Wrap NAV, LINKS and BODY in a complete HTML document with TITLE.
 TITLE is used for the document `<title>' (browser tab).  The
@@ -1781,6 +1821,7 @@ the month navigation."
                 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
                 (format "<title>%s</title>\n" (arche-diary--html-escape title))
                 "<style>\n" arche-diary-html-css "\n</style>\n"
+                (arche-diary--html-mathjax-script body)
                 "</head>\n<body>\n"
                 header
                 nav "\n"

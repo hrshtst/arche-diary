@@ -196,6 +196,7 @@ hand around ordinary image blocks — the prefix is just a shortcut.
 | `arche-diary-html-lang` | `"en"` | `<html lang>` value. |
 | `arche-diary-html-unfill-cjk` | `t` | Join hard-wrapped CJK lines on export so a small `fill-column` does not leave stray spaces mid-sentence (see below). |
 | `arche-diary-html-external-links-new-tab` | `t` | Open external (http/https) links — the link list and links inside notes — in a new browser tab. Relative links are left in place. |
+| `arche-diary-html-mathjax-url` | jsDelivr CDN | MathJax script for pages with LaTeX math. nil → no script; math shows as its source. See [Math](#math-latex). |
 | `arche-diary-html-links-separator` | `" \| "` | Divider placed between links in the link list (e.g. `" \| "` or `" / "`). |
 | `arche-diary-html-noexport-tags` | `("noexport")` | Heading tags that exclude a heading (and everything under it) from HTML export (see below). |
 | `arche-diary-html-strip-image-metadata` | `t` | Strip EXIF/GPS metadata from the published copy of every image. The diary's own files are never touched (see above). |
@@ -246,6 +247,27 @@ without leaving any visible gap. A line ending in an Org hard line break
 exported HTML is affected; your Org files keep their wrapping. Wrapped
 lines with no CJK render the same either way — set it to nil to turn it
 off entirely.
+
+### Math (LaTeX)
+
+LaTeX in a note is displayed as typeset math on the exported page:
+
+| Write | For |
+|---|---|
+| `\(a^2\)` or `$a^2$` | Inline math |
+| `\[ a^2 \]` | Displayed math |
+| `\begin{equation}` … `\end{equation}`, `align`, … | Environments |
+
+**Next to Japanese, use `\(…\)`.** Org only reads `$…$` as math when the closing
+`$` isn't followed by a letter, and it counts CJK characters as letters. So
+`式$a^2$です` stays plain text and comes out wrong, while `式\(a^2\)です` works.
+
+Browsers display the math with [MathJax](https://www.mathjax.org/), which the
+export adds only to pages that contain math, so other pages stay free of
+scripts. A reader's browser fetches it from the server in
+`arche-diary-html-mathjax-url`, by default a public CDN. To avoid the third
+party, host a copy and point that option at it. With nil no script is added and
+math shows as its LaTeX source.
 
 ### Confidential sections that are not exported
 

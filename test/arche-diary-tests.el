@@ -1200,6 +1200,67 @@ either the diary's copy of SRC or SRC itself."
         (arche-diary-export-html '(2026 5))
         (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))))
 
+;;;; math
+
+(ert-deftest arche-diary-tests/export-escapes-math-for-html ()
+  (let ((html (arche-diary--org-string-to-html
+               (concat "inline \\(a<b\\), dollar $c<d$ here\n\n"
+                       "\\[e<f\\]\n\n"
+                       "\\begin{align}\ng &= h \\\\\ni &< j\n\\end{align}\n\n"
+                       "~k<l~"))))
+    ;; The browser would read `<b' as the start of a tag.
+    (should (string-match-p (regexp-quote "\\(a&lt;b\\)") html))
+    (should (string-match-p (regexp-quote "\\(c&lt;d\\)") html))
+    (should (string-match-p (regexp-quote "\\[e&lt;f\\]") html))
+    (should (string-match-p (regexp-quote "g &amp;= h") html))
+    (should (string-match-p (regexp-quote "i &amp;&lt; j") html))
+    ;; Everything else was escaped by Org already, and only once.
+    (should (string-match-p (regexp-quote "<code>k&lt;l</code>") html))
+    (should-not (string-match-p "&amp;lt;" html))))
+
+(ert-deftest arche-diary-tests/export-math-ignores-org-latex-setting ()
+  ;; An image renderer would write files the export knows nothing about,
+  ;; and escaping would corrupt the <img> tag it returns.
+  (let ((org-html-with-latex 'dvipng))
+    (should (string-match-p (regexp-quote "\\(a&lt;b\\)")
+                            (arche-diary--org-string-to-html "\\(a<b\\)")))))
+
+(ert-deftest arche-diary-tests/html-document-loads-mathjax-only-with-math ()
+  (cl-flet ((doc (body) (arche-diary--html-document "t" "" "" body)))
+    (let ((arche-diary-html-mathjax-url "https://example.com/mj.js?a=1&b=2"))
+      (dolist (body '("<p>\\(x\\)</p>"
+                      "<p>\\[x\\]</p>"
+                      "\\begin{equation}\nx\n\\end{equation}"))
+        (should (string-match-p
+                 (regexp-quote
+                  "<script async src=\"https://example.com/mj.js?a=1&amp;b=2\"></script>\n</head>")
+                 (doc body))))
+      (should-not (string-match-p "<script" (doc "<p>$5 and C:\\dir (x)</p>"))))
+    (let ((arche-diary-html-mathjax-url nil))
+      (should-not (string-match-p "<script" (doc "<p>\\(x\\)</p>"))))))
+
+(ert-deftest arche-diary-tests/export-loads-mathjax-on-pages-with-math ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-html-index-recent-count 1))
+      (with-current-buffer (arche-diary-open-month '(2026 4))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (insert "** plain\nno math here\n")
+        (save-buffer))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (insert "** study\nsee \\(a<b\\) here\n")
+        (save-buffer))
+      (arche-diary-export-html 'all)
+      (cl-flet ((page (name) (arche-diary-tests--contents
+                              (expand-file-name name
+                                                arche-diary-html-directory))))
+        (should-not (string-match-p "<script" (page "2026-04.html")))
+        (should (string-match-p "<script" (page "2026-05.html")))
+        ;; The index embeds May, so it needs the script too.
+        (should (string-match-p "<script" (page "index.html")))))))
+
 ;;;; examples/upload-diary
 
 (defconst arche-diary-tests--upload-script
