@@ -647,6 +647,81 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                             (arche-diary--org-string-to-html
                              "あいう\\\\\nえお")))))
 
+(ert-deftest arche-diary-tests/unfill-cjk-keeps-planning-and-clock-lines ()
+  (dolist (str '("*** sub\nDEADLINE: <2026-01-01 Thu>\nfoo"
+                 "*** sub\nSCHEDULED: <2026-01-01 Thu>\nfoo"
+                 "*** sub\nCLOSED: [2026-01-01 Thu]\nfoo"
+                 "*** sub\nDeadline: tomorrow\nfoo"
+                 "CLOCK: [2026-01-01 Thu 10:00]\nfoo"
+                 "clock: [2026-01-01 Thu 10:00]\nfoo"
+                 "foo\nCLOCK: [2026-01-01 Thu 10:00]"))
+    (should (equal (arche-diary--unfill-cjk str) str)))
+  ;; Org reads these as ordinary text, so they fold like any other line.
+  (should (equal (arche-diary--unfill-cjk "あ\nDeadline: 明日\nい")
+                 "あDeadline: 明日い"))
+  (should (equal (arche-diary--unfill-cjk "*** sub\nあ\nDEADLINE: 明日\nい")
+                 "*** sub\nあDEADLINE: 明日い"))
+  (should (equal (arche-diary--unfill-cjk "CLOCK: 正午\nい")
+                 "CLOCK: 正午い")))
+
+(ert-deftest arche-diary-tests/unfill-cjk-leaves-latex-environments-untouched ()
+  (dolist (str '("foo\n\\begin{equation}\nx=1\ny=2\n\\end{equation}\nbar"
+                 ;; The inner closing line must not end the outer environment.
+                 "\\begin{a}\n\\begin{b}\nx\ny\n\\end{b}\nz\nw\n\\end{a}\nbar"))
+    (should (equal (arche-diary--unfill-cjk str) str)))
+  ;; Lines after a closed environment fold as usual, even a one-line one.
+  (should (equal (arche-diary--unfill-cjk "\\begin{a}\nx\n\\end{a}\nあ\nい")
+                 "\\begin{a}\nx\n\\end{a}\nあい"))
+  (should (equal (arche-diary--unfill-cjk "\\begin{a} x \\end{a}\nあ\nい")
+                 "\\begin{a} x \\end{a}\nあい")))
+
+(ert-deftest arche-diary-tests/unfill-does-not-change-non-cjk-rendering ()
+  ;; Unfilling exists for CJK line breaks.  Org syntax that depends on its
+  ;; line structure must come out as it would without it.
+  (cl-flet ((render (str unfill)
+              (let ((arche-diary-html-unfill-cjk unfill))
+                ;; Headings get random ids, so those can't be compared.
+                (replace-regexp-in-string
+                 "[ \t\n]+" " "
+                 (replace-regexp-in-string
+                  "\\(id=\"\\)[^\"]*" "\\1"
+                  (arche-diary--org-string-to-html str))))))
+    (dolist (str '("foo\nbar"
+                   "foo\\\\\nbar"
+                   "foo\\\\\\\nbar"
+                   ": one\n: two"
+                   "foo\n# hidden\nbar"
+                   "foo\n-----\nbar"
+                   "foo\n:LOGBOOK:\nsecret\n:END:\nbar"
+                   "foo\n\\begin{equation}\nx=1\ny=2\n\\end{equation}\nbar"
+                   "\\begin{a}\n\\begin{b}\nx\n\\end{b}\ny\n\\end{a}\nbar"
+                   "\\begin{a} x \\end{a}\nfoo"
+                   "\\begin{a}\nx \\end{a}\nfoo"
+                   "\\begin{a}\nno close\nfoo"
+                   "CLOCK: [2026-01-01 Thu 10:00]\nfoo"
+                   "clock: [2026-01-01 Thu 10:00]\nfoo"
+                   "CLOCK: at noon\nfoo"
+                   "foo\nCLOCK: [2026-01-01 Thu 10:00]\nbar"
+                   "*** sub\nCLOCK: [2026-01-01 Thu 10:00]\nfoo"
+                   "*** sub\nDEADLINE: <2026-01-01 Thu>\nfoo"
+                   "*** sub\nSCHEDULED: <2026-01-01 Thu>\nfoo"
+                   "*** sub\nCLOSED: [2026-01-01 Thu]\nfoo"
+                   "*** sub\nDeadline: tomorrow\nfoo"
+                   "*** sub\nfirst\nDEADLINE: <2026-01-01 Thu>\nfoo"
+                   "DEADLINE: tomorrow\nfoo"
+                   "- item\n  more\n- next"
+                   "1. one\n2. two"
+                   "| a |\n| b |"
+                   "*** sub\nfoo\n*** sub2\nbar"))
+      (ert-info (str)
+        (should (equal (render str t) (render str nil)))))))
+
+(ert-deftest arche-diary-tests/export-keeps-text-after-planning-line ()
+  (let ((html (arche-diary--org-string-to-html
+               "*** sub\nDEADLINE: <2026-01-01 Thu>\nfoo")))
+    (should (string-match-p "foo" html))
+    (should-not (string-match-p "DEADLINE" html))))
+
 (ert-deftest arche-diary-tests/export-unfills-cjk-lines ()
   (arche-diary-tests--with-dir 'plain
     (with-current-buffer (arche-diary-open-month '(2026 5))

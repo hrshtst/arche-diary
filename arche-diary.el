@@ -1405,11 +1405,21 @@ Covers CJK symbols and punctuation, hiragana, katakana, the CJK
 Unified Ideographs (plus extension A), and halfwidth/fullwidth
 forms.")
 
-(defconst arche-diary--unfill-block-begin-re "^[ \t]*#\\+begin_"
-  "Regexp matching the opening line of an Org block.")
+(defconst arche-diary--unfill-block-begin-re
+  "^[ \t]*\\(?:#\\+begin_\\|\\\\begin{\\([A-Za-z0-9*]+\\)}\\)"
+  "Regexp matching the opening line of an Org block or LaTeX environment.
+Group 1 is the name of the LaTeX environment.")
 
 (defconst arche-diary--unfill-block-end-re "^[ \t]*#\\+end_"
   "Regexp matching the closing line of an Org block.")
+
+(defconst arche-diary--unfill-latex-end-format "\\\\end{%s}[ \t]*$"
+  "Format of a regexp matching the end of a named LaTeX environment.
+As for Org, it need not start its line, and may be on the opening line.")
+
+(defconst arche-diary--unfill-planning-re
+  "^[ \t]*\\(?:CLOSED\\|DEADLINE\\|SCHEDULED\\):"
+  "Regexp matching a line that starts with an Org planning keyword.")
 
 (defconst arche-diary--unfill-element-start-re
   (concat "^\\(?:"
@@ -1422,6 +1432,7 @@ forms.")
           "\\|[ \t]*:"                  ; drawer or fixed-width line
           "\\|\\*+[ \t]"                ; heading
           "\\|\\[fn:"                   ; footnote definition
+          "\\|[ \t]*CLOCK:[ \t]*\\(?:\\[\\|$\\)" ; clock line
           "\\)")
   "Regexp matching a line that begins a new Org element.
 Such a line is never folded onto the preceding one.")
@@ -1435,6 +1446,8 @@ Such a line is never folded onto the preceding one.")
           "\\|[ \t]*:"                  ; drawer or fixed-width line
           "\\|\\*+[ \t]"                ; heading
           "\\|\\(?:.*[^\\\\]\\)?\\\\\\\\[ \t]*$" ; ends in a hard line break
+          "\\|[ \t]*CLOCK:[ \t]*\\(?:\\[\\|$\\)" ; clock line
+          "\\|.*\\\\end{[A-Za-z0-9*]+}[ \t]*$"   ; end of a LaTeX environment
           "\\)")
   "Regexp matching a line that cannot absorb a following continuation.
 List items are absent on purpose: their wrapped continuation lines
@@ -1477,6 +1490,15 @@ its markup."
       (and (> (length cont) 0)
            (string-match-p arche-diary--emphasis-marker-re (substring cont 0 1)))))
 
+(defun arche-diary--unfill-planning-line-p (acc)
+  "Return non-nil if the newest line in ACC is an Org planning line.
+ACC holds the lines so far, newest first.  Org only reads a line as
+planning directly under a heading, and leaves it out of the export
+along with anything folded onto it; elsewhere it is ordinary text."
+  (and (string-match-p arche-diary--unfill-planning-re (car acc))
+       (cadr acc)
+       (string-match-p "^\\*+[ \t]" (cadr acc))))
+
 (defun arche-diary--unfill-cjk (str)
   "Join hard-wrapped lines in STR for CJK-friendly HTML export.
 Within a paragraph or list item, a line break is dropped entirely
@@ -1488,22 +1510,29 @@ break would press an Org emphasis marker (e.g. `~code~') directly
 against a CJK character — which Org refuses to parse as emphasis —
 a zero-width space is inserted instead, so the markup survives
 without a visible gap.  Blank lines, headings, lists, tables,
-keywords and `#+begin_..#+end_' blocks keep their own lines, and a
-line ending in an Org hard line break keeps its newline."
+keywords, clock and planning lines, `#+begin_..#+end_' blocks and
+LaTeX environments keep their own lines, and a line ending in an Org
+hard line break keeps its newline."
   (let ((acc nil)
-        (in-block nil))
+        (in-block nil))                 ; Regexp ending the current block.
     (dolist (line (split-string str "\n"))
       (cond
        (in-block
         (push line acc)
-        (when (string-match-p arche-diary--unfill-block-end-re line)
+        (when (string-match-p in-block line)
           (setq in-block nil)))
-       ((string-match-p arche-diary--unfill-block-begin-re line)
-        (setq in-block t)
+       ((string-match arche-diary--unfill-block-begin-re line)
+        (let ((end-re (if (match-beginning 1)
+                          (format arche-diary--unfill-latex-end-format
+                                  (regexp-quote (match-string 1 line)))
+                        arche-diary--unfill-block-end-re)))
+          (unless (string-match-p end-re line)
+            (setq in-block end-re)))
         (push line acc))
        ((and acc
              (not (string-match-p arche-diary--unfill-non-appendable-re
                                   (car acc)))
+             (not (arche-diary--unfill-planning-line-p acc))
              (not (string-match-p arche-diary--unfill-element-start-re line)))
         (let* ((prev (string-trim-right (car acc)))
                (cont (string-trim-left line))
