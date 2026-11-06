@@ -43,6 +43,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-visit-date` | Open the appropriate month and put point at a date heading (creating both if missing). |
 | `arche-diary-fill-dates` | Insert headings for every day in a range. |
 | `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
+| `arche-diary-insert-entry-link` | Insert a link at point to any published entry in the diary. See [Links to other entries](#links-to-other-entries). |
 | `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. Forcing also writes those months' images again. |
 
 ### Accepted argument formats
@@ -247,6 +248,36 @@ without leaving any visible gap. A line ending in an Org hard line break
 exported HTML is affected; your Org files keep their wrapping. Wrapped
 lines with no CJK render the same either way — set it to nil to turn it
 off entirely.
+
+### Links to other entries
+
+A note can link to any date or note in the diary, in any month:
+
+```org
+[[diary:2026-05-15][that day]]
+[[diary:2026-05-15::富士山 ハイク][that note]]
+[[diary:2026-05-15]]
+```
+
+Without a description, as in the last one, the link's text is the entry's
+heading. You don't have to type these: `M-x arche-diary-insert-entry-link` lets
+you pick from every published entry, newest first, and uses the selected text as
+the description if there is any.
+
+On the exported page, the link jumps to the entry on its month's page, such as
+`2026-05.html#2026-05-15`. In Emacs, `C-c C-o` on it opens the entry.
+
+A note is found by its title under that date, so **renaming a note breaks the
+links to it**, and two notes with the same title under one date are told apart
+only for the page: a link goes to the first. A link to anything that isn't
+published, because it doesn't exist or is `:noexport:`, is exported as plain text
+with a warning, and never shows that entry's title.
+
+A link is only checked when the page holding it is exported. After renaming or
+hiding a note, `C-u C-u M-x arche-diary-export-html` checks them all.
+
+Pages exported before this feature have no anchors to jump to, so run that once
+too.
 
 ### Math (LaTeX)
 

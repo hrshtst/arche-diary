@@ -597,15 +597,20 @@ A hash table when active, else nil.  Bound for the dynamic extent
 of one export so a month read once (e.g. for its own page) is not
 re-parsed and re-exported for `index.html'.")
 
+(defvar arche-diary--month-entries-cache nil
+  "Per-export cache mapping a month's Org PATH to its published entries.
+A hash table when active, else nil.  Bound for the dynamic extent
+of one export so that several links into a month read it once.")
+
 (defmacro arche-diary--with-export-caches (&rest body)
   "Run BODY in the dynamic environment used for one export.
 
-Two per-export caches are bound, sound only because the Org
-sources are not modified during an export: a single command may
-scan the directory and render the same month several times (its
-own page plus `index.html'), and without memoization each scan
-re-runs `denote-directory-files' and each render re-exports every
-note through Org.  Nesting reuses the outer caches.
+Per-export caches are bound, sound only because the Org sources
+are not modified during an export: a single command may scan the
+directory and render the same month several times (its own page
+plus `index.html'), and without memoization each scan re-runs
+`denote-directory-files' and each render re-exports every note
+through Org.  Nesting reuses the outer caches.
 
 It also pins `org-modules-loaded' to t for the duration.  The
 first Org export in an Emacs session otherwise calls
@@ -623,6 +628,9 @@ loads the user's modules normally."
               (cons t (arche-diary--list-month-files))))
          (arche-diary--month-data-cache
           (or arche-diary--month-data-cache
+              (make-hash-table :test 'equal)))
+         (arche-diary--month-entries-cache
+          (or arche-diary--month-entries-cache
               (make-hash-table :test 'equal)))
          (org-modules-loaded t))
      ,@body))
@@ -1628,10 +1636,11 @@ The trailing Org tags of HEADING are matched against
        (cl-some (lambda (tag) (member tag arche-diary-html-noexport-tags))
                 (arche-diary--heading-tags heading))))
 
-(defun arche-diary--collect-notes-after-point (bound)
+(defun arche-diary--collect-notes-after-point (bound &optional titles-only)
   "Collect level-2 notes between point and BOUND, in document order.
 Each entry is a cons (TITLE . HTML-BODY).  Notes whose heading
-carries a tag in `arche-diary-html-noexport-tags' are skipped."
+carries a tag in `arche-diary-html-noexport-tags' are skipped.  With
+TITLES-ONLY non-nil, HTML-BODY is nil and nothing is exported."
   (let (results)
     (save-excursion
       (while (re-search-forward "^\\*\\* +\\(.*\\)$" bound t)
@@ -1643,8 +1652,10 @@ carries a tag in `arche-diary-html-noexport-tags' are skipped."
                                (if (re-search-forward "^\\*\\*? " bound t)
                                    (line-beginning-position)
                                  bound)))
-                   (body-text (buffer-substring-no-properties body-start body-end))
-                   (body-html (arche-diary--org-string-to-html body-text)))
+                   (body-html
+                    (unless titles-only
+                      (arche-diary--org-string-to-html
+                       (buffer-substring-no-properties body-start body-end)))))
               (push (cons title body-html) results))))))
     (nreverse results)))
 
@@ -1663,9 +1674,11 @@ is not re-parsed and re-exported for `index.html'."
           hit))
     (arche-diary--read-month-data path)))
 
-(defun arche-diary--read-month-data (path)
+(defun arche-diary--read-month-data (path &optional titles-only)
   "Parse PATH and return its month data; see `arche-diary--month-data'.
-This always reads and exports from disk, bypassing any cache."
+This always reads and exports from disk, bypassing any cache.  With
+TITLES-ONLY non-nil, note bodies are not exported, which is what lets
+`arche-diary--month-entries' run while another export is under way."
   (with-temp-buffer
     (insert-file-contents path)
     (let ((org-inhibit-startup t))
@@ -1686,7 +1699,8 @@ This always reads and exports from disk, bypassing any cache."
                                   (point-max))))
                    (notes (save-excursion
                             (forward-line 1)
-                            (arche-diary--collect-notes-after-point block-end))))
+                            (arche-diary--collect-notes-after-point
+                             block-end titles-only))))
               (push (list iso display notes) results)))))
       (nreverse results))))
 
@@ -1722,27 +1736,54 @@ empty string when MONTHS is empty."
         " ")
        "</nav>"))))
 
+(defun arche-diary--note-slug (title)
+  "Return note TITLE in a form that is safe in an id and a URL fragment.
+Keeps CJK and other letters, so the anchor stays readable."
+  (let ((slug (string-trim
+               (replace-regexp-in-string
+                "[][[:space:]\"'<>&#%?/\\\\`{}|^]+" "-" title)
+               "-+" "-+")))
+    (if (string-empty-p slug) "note" slug)))
+
+(defun arche-diary--note-anchors (iso titles)
+  "Return the anchor of each of TITLES, the notes under date ISO.
+TITLES must be in document order.  A later note whose title gives the
+same slug takes a numeric suffix, so the anchors are unique and adding
+a note at the end moves none that a link may already point at."
+  (let ((seen (make-hash-table :test 'equal)))
+    (mapcar (lambda (title)
+              (let* ((base (format "%s-%s" iso (arche-diary--note-slug title)))
+                     (count (1+ (gethash base seen 0))))
+                (puthash base count seen)
+                (if (= count 1) base (format "%s-%d" base count))))
+            titles)))
+
 (defun arche-diary--month-section-html (year month data)
   "Render DATA into an HTML fragment for YEAR/MONTH (newest first)."
   (let* ((rev-data (reverse data))
          (date-htmls
           (mapcar
            (lambda (entry)
-             (let* ((display (nth 1 entry))
+             (let* ((iso (nth 0 entry))
+                    (display (nth 1 entry))
                     (notes (nth 2 entry))
-                    (rev-notes (reverse notes))
+                    (anchors (arche-diary--note-anchors
+                              iso (mapcar #'car notes)))
+                    (rev-notes (reverse (cl-mapcar #'cons notes anchors)))
                     (note-blocks
                      (if rev-notes
                          (mapconcat
                           (lambda (n)
                             (format
-                             "<section class=\"note\">\n<h3>%s</h3>\n%s\n</section>"
-                             (arche-diary--html-escape (car n))
-                             (cdr n)))
+                             "<section class=\"note\" id=\"%s\">\n<h3>%s</h3>\n%s\n</section>"
+                             (arche-diary--html-escape (cdr n))
+                             (arche-diary--html-escape (caar n))
+                             (cdar n)))
                           rev-notes
                           "\n<hr class=\"note-sep\">\n")
                        "")))
-               (format "<article class=\"date\">\n<h2>%s</h2>\n%s\n</article>"
+               (format "<article class=\"date\" id=\"%s\">\n<h2>%s</h2>\n%s\n</article>"
+                       (arche-diary--html-escape iso)
                        (arche-diary--html-escape display)
                        note-blocks)))
            rev-data)))
@@ -1959,6 +2000,169 @@ running `arche-diary-after-export-hook'."
           (let ((arche-diary--force-image-copy t))
             (arche-diary--render-month-html y m)))
         (finish))))))
+
+
+;;; Entry links
+
+(defun arche-diary--month-entries (path)
+  "Return the published entries of the month file PATH, exporting nothing.
+A list of (ISO DISPLAY NOTES) in document order, where NOTES is a list
+of (TITLE . ANCHOR).  It reads the file the way the page is rendered, so
+the two agree on what is published and on what the anchors are.
+Memoized like `arche-diary--month-data' when a per-export cache is
+active."
+  (cl-flet ((read-entries ()
+              (mapcar
+               (lambda (entry)
+                 (let ((iso (nth 0 entry))
+                       (titles (mapcar #'car (nth 2 entry))))
+                   (list iso (nth 1 entry)
+                         (cl-mapcar #'cons titles
+                                    (arche-diary--note-anchors iso titles)))))
+               (arche-diary--read-month-data path t))))
+    (if arche-diary--month-entries-cache
+        (let ((hit (gethash path arche-diary--month-entries-cache 'miss)))
+          (if (eq hit 'miss)
+              (puthash path (read-entries) arche-diary--month-entries-cache)
+            hit))
+      (read-entries))))
+
+(defconst arche-diary--link-path-regexp
+  "\\`\\(\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-[0-9]\\{2\\}\\)\\(?:::\\(.+\\)\\)?\\'"
+  "Regexp matching the path of a `diary:' link, DATE or DATE::TITLE.
+Groups: 1 the date, 2 its year, 3 its month, 4 the note's title.")
+
+(defun arche-diary--link-target (path)
+  "Return (PAGE ANCHOR LABEL) for the entry the `diary:' link PATH names.
+LABEL is the entry's heading.  Return nil unless it is a published one."
+  (when (string-match arche-diary--link-path-regexp path)
+    (let* ((iso (match-string 1 path))
+           (title (match-string 4 path))
+           (year (string-to-number (match-string 2 path)))
+           (month (string-to-number (match-string 3 path)))
+           (file (arche-diary--month-file year month))
+           (entry (and file (assoc iso (arche-diary--month-entries file))))
+           (note (and entry title (assoc title (nth 2 entry))))
+           (page (format "%04d-%02d.html" year month)))
+      (cond
+       ((null entry) nil)
+       ((null title) (list page iso (nth 1 entry)))
+       (note (list page (cdr note) title))))))
+
+(defun arche-diary--link-plain-text (path desc)
+  "Return the text of the `diary:' link PATH with description DESC, unlinked.
+Never includes the title in PATH: it may be that of an unpublished note."
+  (or desc (arche-diary--html-escape (car (split-string path "::")))))
+
+;;;###autoload
+(defun arche-diary--link-export (path desc backend &optional _info)
+  "Export the `diary:' link PATH with description DESC for BACKEND.
+In HTML it becomes a link to the entry on its month's page.  A link to
+no published entry becomes plain text with a warning: an anchor that
+isn't there helps nobody, and the URL of a `:noexport:' note would
+publish its title."
+  (if (not (org-export-derived-backend-p backend 'html))
+      (arche-diary--link-plain-text path desc)
+    (pcase (arche-diary--link-target path)
+      (`(,page ,anchor ,label)
+       (format "<a href=\"%s#%s\">%s</a>"
+               page
+               (arche-diary--html-escape anchor)
+               (or desc (arche-diary--html-escape label))))
+      (_
+       (display-warning
+        'arche-diary
+        (format "The diary link to %s has no published entry, so it was exported as plain text"
+                path))
+       (arche-diary--link-plain-text path desc)))))
+
+;;;###autoload
+(defun arche-diary--link-follow (path &optional _arg)
+  "Open the diary entry that the `diary:' link PATH names.
+Goes to the note's date if the note isn't under it."
+  (unless (string-match arche-diary--link-path-regexp path)
+    (user-error "Not a diary link: %s" path))
+  (let* ((iso (match-string 1 path))
+         (title (match-string 4 path))
+         (file (arche-diary--month-file
+                (string-to-number (match-string 2 path))
+                (string-to-number (match-string 3 path)))))
+    (unless file
+      (user-error "No diary file for %s" iso))
+    (find-file file)
+    (unless (arche-diary--goto-date-heading iso)
+      (user-error "No entry for %s" iso))
+    (when title
+      (let ((date (point))
+            (end (save-excursion
+                   (forward-line 1)
+                   (if (re-search-forward "^\\* " nil t)
+                       (line-beginning-position)
+                     (point-max)))))
+        (if (re-search-forward
+             (format "^\\*\\* +%s\\(?:[ \t]+:[[:alnum:]_@#%%:]+:\\)?[ \t]*$"
+                     (regexp-quote title))
+             end t)
+            (beginning-of-line)
+          (goto-char date)
+          (message "No note titled %s under %s" title iso))))
+    (org-reveal)))
+
+;;;###autoload
+(with-eval-after-load 'ol
+  (org-link-set-parameters "diary"
+                           :follow #'arche-diary--link-follow
+                           :export #'arche-diary--link-export))
+
+(defun arche-diary--entry-candidates ()
+  "Return (LABEL PATH . DESCRIPTION) for each published entry.
+The newest date comes first, each followed by its notes in document
+order.  Entries that are not published are left out: they can't be
+linked to."
+  (let (candidates)
+    (dolist (month (arche-diary--find-or-list-month-files))
+      (dolist (entry (arche-diary--month-entries (nth 2 month)))
+        (let ((iso (nth 0 entry))
+              (display (nth 1 entry)))
+          (setq candidates
+                (append
+                 (cons (cons display (cons iso display))
+                       (mapcar
+                        (lambda (note)
+                          (let ((title (car note)))
+                            (cons (format "%s / %s" display title)
+                                  (cons (format "%s::%s" iso title) title))))
+                        (nth 2 entry)))
+                 candidates)))))
+    candidates))
+
+;;;###autoload
+(defun arche-diary-insert-entry-link (path description)
+  "Insert a link at point to the diary entry named by PATH.
+PATH is DATE or DATE::TITLE, and DESCRIPTION is the link's text.
+
+Called interactively, pick from every published entry in the diary,
+newest first.  The text is the entry's heading, or the active region,
+which the link then replaces."
+  (interactive
+   (let* ((candidates (or (arche-diary--entry-candidates)
+                          (user-error "The diary has no published entries")))
+          (choice (completing-read
+                   "Link to entry: "
+                   (lambda (string pred action)
+                     (if (eq action 'metadata)
+                         '(metadata (display-sort-function . identity)
+                                    (cycle-sort-function . identity))
+                       (complete-with-action action candidates string pred)))
+                   nil t))
+          (target (cdr (assoc choice candidates))))
+     (list (car target)
+           (if (use-region-p)
+               (buffer-substring-no-properties (region-beginning) (region-end))
+             (cdr target)))))
+  (when (use-region-p)
+    (delete-region (region-beginning) (region-end)))
+  (insert (org-link-make-string (concat "diary:" path) description)))
 
 
 (provide 'arche-diary)

@@ -1200,6 +1200,224 @@ either the diary's copy of SRC or SRC itself."
         (arche-diary-export-html '(2026 5))
         (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))))
 
+;;;; entry links
+
+(defun arche-diary-tests--write-month (month text)
+  "Append TEXT to the Org file of 2026's MONTH."
+  (with-current-buffer (arche-diary-open-month (list 2026 month))
+    (goto-char (point-max))
+    (insert text)
+    (save-buffer)))
+
+(defun arche-diary-tests--page (name)
+  "Return exported page NAME, decoded so that Japanese can be matched."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name name arche-diary-html-directory))
+    (buffer-string)))
+
+(defun arche-diary-tests--line-at-point ()
+  "Return the current line."
+  (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+
+(ert-deftest arche-diary-tests/export-gives-entries-anchors ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     5 (concat "* 2026-05-15 Friday\n"
+               "** 富士山 ハイク\nFIRST\n"
+               "** 富士山 ハイク\nSECOND\n"
+               "** hidden :noexport:\nnot published\n"
+               "** a/b <c> & d?\nsymbols\n"
+               "** ???\nonly symbols\n"))
+    (arche-diary-export-html '(2026 5))
+    (let ((page (arche-diary-tests--page "2026-05.html")))
+      (should (string-match-p "<article class=\"date\" id=\"2026-05-15\">" page))
+      ;; The plain anchor stays with the first in document order, so adding a
+      ;; note later doesn't move anything that already has a link to it.
+      (should (string-match-p
+               "<section class=\"note\" id=\"2026-05-15-富士山-ハイク\">\n<h3>[^<]*</h3>\n<p>\nFIRST"
+               page))
+      (should (string-match-p
+               "<section class=\"note\" id=\"2026-05-15-富士山-ハイク-2\">\n<h3>[^<]*</h3>\n<p>\nSECOND"
+               page))
+      (should (string-match-p "id=\"2026-05-15-a-b-c-d\"" page))
+      (should (string-match-p "id=\"2026-05-15-note\"" page))
+      (should-not (string-match-p "hidden" page)))))
+
+(ert-deftest arche-diary-tests/diary-link-exports-to-its-entry ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 "* 2026-04-10 Friday\n** 花見\nbody\n")
+    (cl-flet ((html (str) (arche-diary--org-string-to-html str)))
+      (should (string-match-p
+               (regexp-quote "<a href=\"2026-04.html#2026-04-10\">the day</a>")
+               (html "[[diary:2026-04-10][the day]]")))
+      (should (string-match-p
+               (regexp-quote "<a href=\"2026-04.html#2026-04-10-花見\">a note</a>")
+               (html "[[diary:2026-04-10::花見][a note]]")))
+      ;; Without a description, the heading is the text.
+      (should (string-match-p (regexp-quote ">2026-04-10 Friday</a>")
+                              (html "[[diary:2026-04-10]]")))
+      (should (string-match-p (regexp-quote ">花見</a>")
+                              (html "[[diary:2026-04-10::花見]]")))
+      ;; A description keeps its markup, and folds into Japanese text.
+      (should (string-match-p (regexp-quote "><b>the</b> day</a>")
+                              (html "[[diary:2026-04-10][*the* day]]")))
+      (should (string-match-p
+               (regexp-quote "以前は<a href=\"2026-04.html#2026-04-10\">こちら</a>を参照")
+               (html "以前は\n[[diary:2026-04-10][こちら]]\nを参照"))))))
+
+(ert-deftest arche-diary-tests/diary-link-lands-on-an-anchor-across-months ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 "* 2026-04-10 Friday\n** 花見\nbody\n** a/b c\nbody\n")
+    (arche-diary-tests--write-month
+     5 (concat "* 2026-05-15 Friday\n** back\n"
+               "[[diary:2026-04-10]] [[diary:2026-04-10::花見]] "
+               "[[diary:2026-04-10::a/b c]]\n"))
+    (arche-diary-export-html 'all)
+    (let ((may (arche-diary-tests--page "2026-05.html"))
+          (april (arche-diary-tests--page "2026-04.html"))
+          (start 0)
+          (found 0))
+      (while (string-match "href=\"2026-04\\.html#\\([^\"]+\\)\"" may start)
+        (setq start (match-end 0)
+              found (1+ found))
+        (should (string-match-p (format "id=\"%s\"" (match-string 1 may)) april)))
+      (should (= found 3)))))
+
+(ert-deftest arche-diary-tests/diary-link-without-a-published-target-is-plain-text ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 (concat "* 2026-04-10 Friday\n** public\nx\n"
+               "** 秘密のメモ :noexport:\ny\n"
+               "* 2026-04-11 Saturday :noexport:\n** 別の秘密\nz\n"))
+    (let ((warnings nil))
+      (cl-letf (((symbol-function 'display-warning)
+                 (lambda (_type message &rest _) (push message warnings))))
+        (dolist (path '("2026-04-10::秘密のメモ" ; a :noexport: note
+                        "2026-04-11::別の秘密"   ; under a :noexport: date
+                        "2026-04-11"            ; a :noexport: date
+                        "2026-04-10::renamed"   ; a heading that changed
+                        "2026-04-12"            ; a date that isn't there
+                        "2026-09-01"            ; a month that isn't there
+                        "not-a-date"))
+          (let ((html (arche-diary--org-string-to-html
+                       (format "[[diary:%s]]" path))))
+            (should-not (string-match-p "<a " html))
+            ;; A title in a URL or as the text would publish a hidden note's.
+            (should-not (string-match-p "秘密" html))))
+        (should (= (length warnings) 7))
+        (should (string-match-p "not-a-date" (car warnings)))
+        ;; Its own description is still the author's text to show.
+        (should (string-match-p
+                 "see it"
+                 (arche-diary--org-string-to-html "[[diary:2026-04-12][see it]]")))))))
+
+(ert-deftest arche-diary-tests/diary-link-follow-opens-its-entry ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 (concat "* 2026-04-10 Friday\n** first\nx\n** 花見 :tag:\ny\n"
+               "* 2026-04-11 Saturday\n** 花見\nz\n"))
+    (let ((file (arche-diary--month-file 2026 4)))
+      (cl-flet ((opened (path)
+                  (arche-diary--link-follow path)
+                  (with-current-buffer (get-file-buffer file)
+                    (arche-diary-tests--line-at-point))))
+        (should (equal (opened "2026-04-10") "* 2026-04-10 Friday"))
+        (should (equal (opened "2026-04-10::花見") "** 花見 :tag:"))
+        ;; The same title under another date is another note.
+        (should (equal (opened "2026-04-11::花見") "** 花見"))
+        (with-current-buffer (get-file-buffer file)
+          (should (string-match-p "2026-04-11"
+                                  (save-excursion
+                                    (re-search-backward "^\\* ")
+                                    (arche-diary-tests--line-at-point)))))
+        ;; A renamed note still gets you to its date.
+        (should (equal (opened "2026-04-10::gone") "* 2026-04-10 Friday")))
+      (dolist (path '("2026-04-20" "2026-09-01" "not-a-date"))
+        (should-error (arche-diary--link-follow path) :type 'user-error))
+      ;; And Org itself reaches it from a link in a buffer.
+      (with-temp-buffer
+        (org-mode)
+        (insert "[[diary:2026-04-11]]")
+        (goto-char 3)
+        (org-open-at-point))
+      (with-current-buffer (get-file-buffer file)
+        (should (equal (arche-diary-tests--line-at-point)
+                       "* 2026-04-11 Saturday"))))))
+
+(ert-deftest arche-diary-tests/entry-candidates-are-published-and-newest-first ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 "* 2026-04-10 Friday\n** old\nx\n** hidden :noexport:\ny\n")
+    (arche-diary-tests--write-month
+     5 (concat "* 2026-05-01 Friday\n** a\nx\n** b\ny\n"
+               "* 2026-05-02 Saturday :noexport:\n** gone\nz\n"
+               "* 2026-05-03 Sunday\n"))
+    (should (equal (mapcar #'car (arche-diary--entry-candidates))
+                   '("2026-05-03 Sunday"
+                     "2026-05-01 Friday"
+                     "2026-05-01 Friday / a"
+                     "2026-05-01 Friday / b"
+                     "2026-04-10 Friday"
+                     "2026-04-10 Friday / old")))))
+
+(ert-deftest arche-diary-tests/insert-entry-link-writes-a-working-link ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 "* 2026-04-10 Friday\n** 花見 [1]\nx\n")
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt table &rest _)
+                 ;; The picker keeps its newest-first order.
+                 (should (eq (alist-get 'display-sort-function
+                                        (cdr (funcall table "" nil 'metadata)))
+                             'identity))
+                 "2026-04-10 Friday / 花見 [1]")))
+      (with-temp-buffer
+        (org-mode)
+        (insert "see ")
+        (call-interactively #'arche-diary-insert-entry-link)
+        (should (string-prefix-p "see [[diary:" (buffer-string)))
+        ;; Org follows a closing bracket in a description with a zero-width
+        ;; space, so as not to end the link early; that part isn't ours.
+        (should (string-match-p
+                 (regexp-quote "<a href=\"2026-04.html#2026-04-10-花見-1\">花見 [1]")
+                 (arche-diary--org-string-to-html (buffer-string))))))
+    ;; With text selected, that text is what becomes the link.
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "2026-04-10 Friday")))
+      (with-temp-buffer
+        (org-mode)
+        (insert "see word now")
+        (let ((transient-mark-mode t))
+          (goto-char 5)
+          (push-mark 9 t t)
+          (call-interactively #'arche-diary-insert-entry-link))
+        (should (equal (buffer-string)
+                       "see [[diary:2026-04-10][word]] now"))))))
+
+(ert-deftest arche-diary-tests/insert-entry-link-needs-an-entry ()
+  (arche-diary-tests--with-dir 'plain
+    (with-temp-buffer
+      (org-mode)
+      (should-error (call-interactively #'arche-diary-insert-entry-link)
+                    :type 'user-error))))
+
+(ert-deftest arche-diary-tests/export-reads-a-linked-month-once ()
+  (arche-diary-tests--with-dir 'plain
+    (arche-diary-tests--write-month
+     4 "* 2026-04-10 Friday\n** a\nx\n** b\ny\n")
+    (arche-diary-tests--write-month
+     5 "* 2026-05-15 Friday\n** n\n[[diary:2026-04-10]] [[diary:2026-04-10::a]] [[diary:2026-04-10::b]]\n")
+    (let ((reads 0)
+          (original (symbol-function 'arche-diary--read-month-data)))
+      (cl-letf (((symbol-function 'arche-diary--read-month-data)
+                 (lambda (path &optional titles-only)
+                   (when titles-only (setq reads (1+ reads)))
+                   (funcall original path titles-only))))
+        (arche-diary-export-html '(2026 5)))
+      (should (= reads 1)))))
+
 ;;;; math
 
 (ert-deftest arche-diary-tests/export-escapes-math-for-html ()
