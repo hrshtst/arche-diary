@@ -45,6 +45,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
 | `arche-diary-insert-gallery` | Insert several images at point as one gallery. See [galleries](#multiple-images-in-a-row-galleries). |
 | `arche-diary-insert-entry-link` | Insert a link at point to any published entry in the diary. See [Links to other entries](#links-to-other-entries). |
+| `arche-diary-select-diary` | Switch to another diary and open its file for this month. See [Several diaries](#several-diaries). |
 | `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. Forcing also writes those months' images again. |
 
 ### Accepted argument formats
@@ -194,6 +195,7 @@ blocks — the commands are just a shortcut.
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `arche-diary-diaries` | nil | Several diaries, each with its own settings. See [Several diaries](#several-diaries). |
 | `arche-diary-directory` | `~/diary` | Where Org files live. |
 | `arche-diary-html-directory` | nil | Where HTML is written. nil → `html/` under `arche-diary-directory`. |
 | `arche-diary-file-creation-system` | `denote` | `denote` or `plain`. |
@@ -261,6 +263,57 @@ without leaving any visible gap. A line ending in an Org hard line break
 exported HTML is affected; your Org files keep their wrapping. Wrapped
 lines with no CJK render the same either way — set it to nil to turn it
 off entirely.
+
+### Several diaries
+
+To keep more than one diary, such as a personal one and a record of what you are
+studying, give each its own settings in `arche-diary-diaries`:
+
+```elisp
+(setq arche-diary-diaries
+      '(("diary"  (arche-diary-directory . "~/notes/diary")
+                  (arche-diary-html-directory . "~/www/diary")
+                  (arche-diary-html-page-title . "Diary"))
+        ("invest" (arche-diary-directory . "~/notes/invest")
+                  (arche-diary-html-directory . "~/www/invest")
+                  (arche-diary-html-page-title . "Investing"))))
+```
+
+Any of the package's options can go there. **A command runs in the diary that
+holds the current buffer's file.** In a buffer outside them, such as `*scratch*`,
+it runs in the one you last chose, or else the first. To get to another diary,
+use `M-x arche-diary-select-diary`, which also opens its file for this month,
+creating it the first time.
+
+A diary shares the global value of any option it doesn't set, so a common language
+or stylesheet goes in the usual place. The exceptions are
+`arche-diary-html-directory` and `arche-diary-image-directory`, which default to
+`html/` and `images/` under the diary's own directory, so that no diary can
+overwrite another's pages. Each diary needs its own `arche-diary-directory`. `diary:`
+links only reach entries in the same diary.
+
+Pages only use relative links, so each diary can live in its own folder on one
+server, at `/diary/` and `/invest/` for example. `arche-diary-after-export-hook` runs
+with the exported diary's settings in effect, so a single hook can upload whichever
+one was just exported:
+
+```elisp
+(add-hook 'arche-diary-after-export-hook
+          (lambda ()
+            (let* ((local (expand-file-name arche-diary-html-directory))
+                   (name (file-name-nondirectory (directory-file-name local)))
+                   (process-environment
+                    (append (list "DIARY_FTP_HOST=ftp.example.com"
+                                  (concat "DIARY_FTP_REMOTE=/public_html/" name)
+                                  (concat "ARCHE_DIARY_HTML_DIR=" local))
+                            process-environment)))
+              (start-process "diary-upload" "*diary-upload*"
+                             (expand-file-name "~/bin/upload-diary")))))
+```
+
+A hook that names one folder keeps uploading that folder, whichever diary was
+exported. Give each diary its own remote folder, and never a parent shared with
+another, since the upload mirrors deletions when told to.
 
 ### Links to other entries
 

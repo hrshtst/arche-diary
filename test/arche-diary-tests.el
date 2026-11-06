@@ -1615,6 +1615,296 @@ either the diary's copy of SRC or SRC itself."
         (arche-diary-export-html '(2026 5)))
       (should (= reads 1)))))
 
+;;;; several diaries
+
+(defmacro arche-diary-tests--with-two-diaries (&rest body)
+  "Run BODY with the diaries \"first\" and \"second\" configured.
+The fixture's own directories stay bound as the global settings, as they
+would be in a config that used a single diary before adding a second."
+  (declare (indent 0) (debug t))
+  `(arche-diary-tests--with-dir 'plain
+     (let* ((first-dir (expand-file-name "notes/first" tmpdir))
+            (second-dir (expand-file-name "notes/second" tmpdir))
+            (first-html (expand-file-name "www/first" tmpdir))
+            (second-html (expand-file-name "www/second" tmpdir))
+            (arche-diary--selected-diary nil)
+            (arche-diary-diaries
+             (list (list "first"
+                         (cons 'arche-diary-directory first-dir)
+                         (cons 'arche-diary-html-directory first-html)
+                         (cons 'arche-diary-html-page-title "FIRST-TITLE"))
+                   (list "second"
+                         (cons 'arche-diary-directory second-dir)
+                         (cons 'arche-diary-html-directory second-html)
+                         (cons 'arche-diary-html-page-title "SECOND-TITLE")))))
+       (make-directory first-dir t)
+       (make-directory second-dir t)
+       ,@body)))
+
+(defun arche-diary-tests--read-file (path)
+  "Return the contents of PATH, decoded."
+  (with-temp-buffer
+    (insert-file-contents path)
+    (buffer-string)))
+
+(defun arche-diary-tests--diary-buffer (dir month text)
+  "Return a buffer visiting 2026's MONTH in diary DIR, holding TEXT."
+  (let ((path (expand-file-name (format "2026-%02d.org" month) dir)))
+    (with-temp-file path
+      (insert (format "#+title: 2026-%02d\n\n" month) text))
+    (find-file-noselect path)))
+
+(ert-deftest arche-diary-tests/no-diaries-means-the-global-settings ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-diaries nil))
+      (should-not (arche-diary-current-diary))
+      (with-temp-buffer
+        (arche-diary-open-month '(2026 5)))
+      (should (file-exists-p (expand-file-name "2026-05.org" tmpdir))))))
+
+(ert-deftest arche-diary-tests/diaries-keep-their-files-and-pages-apart ()
+  (arche-diary-tests--with-two-diaries
+    (with-temp-buffer
+      ;; With nothing selected, the first one is current.
+      (should (equal (arche-diary-current-diary) "first"))
+      (arche-diary-tests--write-month 5 "* 2026-05-15 Friday\n** FIRST-NOTE\nx\n")
+      (arche-diary-export-html 'all))
+    (with-temp-buffer
+      (arche-diary-select-diary "second")
+      (with-temp-buffer
+        (should (equal (arche-diary-current-diary) "second"))
+        (arche-diary-tests--write-month 5 "* 2026-05-15 Friday\n** SECOND-NOTE\nx\n")
+        (arche-diary-export-html 'all)))
+    (let ((first-page (arche-diary-tests--read-file
+                       (expand-file-name "2026-05.html" first-html)))
+          (second-page (arche-diary-tests--read-file
+                        (expand-file-name "2026-05.html" second-html))))
+      (should (string-match-p "FIRST-NOTE" first-page))
+      (should (string-match-p "FIRST-TITLE" first-page))
+      (should-not (string-match-p "SECOND" first-page))
+      (should (string-match-p "SECOND-NOTE" second-page))
+      (should (string-match-p "SECOND-TITLE" second-page))
+      (should-not (string-match-p "FIRST" second-page)))
+    ;; The global directories, shared by nothing here, stay untouched.
+    (should-not (file-exists-p arche-diary-html-directory))
+    (should-not (file-exists-p (expand-file-name "2026-05.org" tmpdir)))))
+
+(ert-deftest arche-diary-tests/diaries-commands-follow-the-current-buffer ()
+  (arche-diary-tests--with-two-diaries
+    (let ((src (car (arche-diary-tests--make-files
+                     (expand-file-name "pics" tmpdir) "shot.png")))
+          (first-buffer (arche-diary-tests--diary-buffer
+                         first-dir 5 "* 2026-05-15 Friday\n** FIRST-NOTE\nx\n"))
+          (second-buffer (arche-diary-tests--diary-buffer
+                          second-dir 5 "* 2026-05-15 Friday\n** SECOND-NOTE\nx\n")))
+      ;; The first diary is selected, but this buffer is in the second.
+      (should (equal (with-current-buffer first-buffer
+                       (arche-diary-current-diary))
+                     "first"))
+      (with-current-buffer second-buffer
+        (should (equal (arche-diary-current-diary) "second"))
+        (arche-diary-add-date "16")
+        (goto-char (point-max))
+        (insert "** photo\n")
+        (arche-diary-insert-image src)
+        (save-buffer)
+        (should (file-exists-p
+                 (expand-file-name "images/2026-05-16/shot.png" second-dir)))
+        (should-not (file-exists-p (expand-file-name "images" first-dir)))
+        ;; Exporting from here writes the second diary's page.
+        (arche-diary-export-html '(2026 5))
+        (should (file-exists-p (expand-file-name "2026-05.html" second-html)))
+        (should (file-exists-p
+                 (expand-file-name "images/2026-05-16/shot.png" second-html)))
+        (should-not (file-exists-p first-html))
+        ;; Filling dates writes here, and leaves the first diary alone.
+        (arche-diary-fill-dates "2026-05-20" "2026-05-20")
+        (should (string-match-p
+                 "2026-05-20"
+                 (arche-diary-tests--read-file
+                  (expand-file-name "2026-05.org" second-dir))))
+        (should-not (string-match-p
+                     "2026-05-20"
+                     (arche-diary-tests--read-file
+                      (expand-file-name "2026-05.org" first-dir)))))
+      ;; Visiting a date and following a link stay in the diary too.
+      (with-current-buffer second-buffer
+        (should (file-in-directory-p
+                 (buffer-file-name (arche-diary-visit-date "2026-05-15"))
+                 second-dir))
+        (arche-diary--link-follow "2026-05-15")
+        (should (file-in-directory-p (buffer-file-name (window-buffer))
+                                     second-dir))))))
+
+(ert-deftest arche-diary-tests/diaries-resolve-links-within-themselves ()
+  (arche-diary-tests--with-two-diaries
+    (arche-diary-tests--diary-buffer
+     first-dir 4 "* 2026-04-10 Friday\n** only in first\nx\n")
+    (arche-diary-tests--diary-buffer
+     second-dir 4 "* 2026-04-10 Friday\n** only in second\nx\n")
+    (let ((buffer (arche-diary-tests--diary-buffer
+                   second-dir 5
+                   (concat "* 2026-05-15 Friday\n** n\n"
+                           "[[diary:2026-04-10::only in second]] "
+                           "[[diary:2026-04-10::only in first]]\n")))
+          (warnings nil))
+      ;; The first diary is selected, and a note exports in a temporary
+      ;; buffer, which belongs to neither.  The diary doesn't change.
+      (with-current-buffer buffer
+        (cl-letf (((symbol-function 'display-warning)
+                   (lambda (_type message &rest _) (push message warnings))))
+          (arche-diary-export-html '(2026 5))))
+      (let ((page (arche-diary-tests--read-file
+                   (expand-file-name "2026-05.html" second-html))))
+        (should (string-match-p "href=\"2026-04.html#2026-04-10-only-in-second\"" page))
+        (should-not (string-match-p "only-in-first" page)))
+      (should (= (length warnings) 1))
+      ;; The picker offers this diary's entries only.
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt table &rest _)
+                   (let ((offered (all-completions "" table)))
+                     (should (member "2026-04-10 Friday / only in second" offered))
+                     (should-not (member "2026-04-10 Friday / only in first" offered)))
+                   "2026-04-10 Friday")))
+        (with-current-buffer buffer
+          (goto-char (point-max))
+          (call-interactively #'arche-diary-insert-entry-link))))))
+
+(ert-deftest arche-diary-tests/diary-without-output-settings-stays-in-its-directory ()
+  ;; Falling back to the global html directory would overwrite another
+  ;; diary's pages, and its upload hook would publish them.
+  (arche-diary-tests--with-dir 'plain
+    (let* ((bare (expand-file-name "notes/bare" tmpdir))
+           (arche-diary--selected-diary nil)
+           (arche-diary-image-directory (expand-file-name "global-images" tmpdir))
+           (arche-diary-diaries (list (list "bare" (cons 'arche-diary-directory bare))))
+           (src (car (arche-diary-tests--make-files
+                      (expand-file-name "pics" tmpdir) "shot.png"))))
+      (make-directory bare t)
+      (with-current-buffer (arche-diary-tests--diary-buffer
+                            bare 5 "* 2026-05-15 Friday\n** note\n")
+        (goto-char (point-max))
+        (arche-diary-insert-image src)
+        (save-buffer)
+        (arche-diary-export-html '(2026 5)))
+      (should (file-exists-p (expand-file-name "html/2026-05.html" bare)))
+      (should (file-exists-p (expand-file-name "images/2026-05-15/shot.png" bare)))
+      (should (file-exists-p (expand-file-name "html/images/2026-05-15/shot.png" bare)))
+      (should-not (file-exists-p arche-diary-html-directory))
+      (should-not (file-exists-p arche-diary-image-directory)))))
+
+(ert-deftest arche-diary-tests/diary-must-set-its-directory ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary--selected-diary nil)
+          (arche-diary-diaries (list (list "oops" (cons 'arche-diary-html-page-title "x")))))
+      (with-temp-buffer
+        (should-error (arche-diary-open-month '(2026 5)) :type 'user-error))
+      (should-not (file-exists-p (expand-file-name "2026-05.org" tmpdir))))))
+
+(ert-deftest arche-diary-tests/select-diary-opens-that-diary-from-anywhere ()
+  (arche-diary-tests--with-two-diaries
+    (with-current-buffer (arche-diary-tests--diary-buffer first-dir 5 "")
+      ;; The current buffer can't decide here: this is how you get across.
+      (let ((buffer (arche-diary-select-diary "second")))
+        (should (file-in-directory-p (buffer-file-name buffer) second-dir))))
+    (with-temp-buffer
+      (should (equal (arche-diary-current-diary) "second")))
+    (should-error (arche-diary-select-diary "nope") :type 'user-error)
+    ;; Interactively, the choice comes from the configured names.
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt names &rest _)
+                 (should (equal names '("first" "second")))
+                 "first")))
+      (call-interactively #'arche-diary-select-diary)
+      (with-temp-buffer
+        (should (equal (arche-diary-current-diary) "first")))))
+  (let ((arche-diary-diaries nil))
+    (should-error (call-interactively #'arche-diary-select-diary)
+                  :type 'user-error)))
+
+(ert-deftest arche-diary-tests/export-hook-sees-its-diary ()
+  (arche-diary-tests--with-two-diaries
+    (let* ((seen nil)
+           (arche-diary-after-export-hook
+            (list (lambda ()
+                    (setq seen (list (arche-diary-current-diary)
+                                     arche-diary-html-directory))))))
+      (with-current-buffer (arche-diary-tests--diary-buffer second-dir 5 "")
+        (arche-diary-export-html '(2026 5)))
+      (should (equal seen (list "second" second-html))))))
+
+(ert-deftest arche-diary-tests/diary-settings-reach-a-command-s-prompts ()
+  (arche-diary-tests--with-two-diaries
+    ;; Whether to copy is worked out in the command's interactive form.
+    (setcdr (assoc "second" arche-diary-diaries)
+            (cons (cons 'arche-diary-image-copy nil)
+                  (cdr (assoc "second" arche-diary-diaries))))
+    (let ((src (car (arche-diary-tests--make-files
+                     (expand-file-name "pics" tmpdir) "shot.png"))))
+      (cl-letf (((symbol-function 'read-file-name) (lambda (&rest _) src)))
+        (with-current-buffer (arche-diary-tests--diary-buffer
+                              second-dir 5 "* 2026-05-15 Friday\n")
+          (goto-char (point-max))
+          (call-interactively #'arche-diary-insert-image)
+          (should (string-match-p "pics/shot\\.png" (buffer-string))))
+        (with-current-buffer (arche-diary-tests--diary-buffer
+                              first-dir 5 "* 2026-05-15 Friday\n")
+          (goto-char (point-max))
+          (call-interactively #'arche-diary-insert-image)
+          (should (string-match-p "images/2026-05-15/shot\\.png"
+                                  (buffer-string))))))))
+
+(ert-deftest arche-diary-tests/diary-is-found-through-a-symlink ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((real (expand-file-name "dropbox/invest" tmpdir))
+           (link (expand-file-name "invest-link" tmpdir))
+           (arche-diary--selected-diary nil)
+           (arche-diary-diaries
+            (list (list "other" (cons 'arche-diary-directory
+                                      (expand-file-name "other" tmpdir)))
+                  (list "invest" (cons 'arche-diary-directory link)))))
+      (make-directory real t)
+      (make-symbolic-link real link)
+      (with-current-buffer (arche-diary-tests--diary-buffer real 5 "")
+        (should (equal (arche-diary-current-diary) "invest"))))))
+
+(ert-deftest arche-diary-tests/diary-can-use-the-denote-backend ()
+  (arche-diary-tests--with-two-diaries
+    (setcdr (assoc "second" arche-diary-diaries)
+            (cons (cons 'arche-diary-file-creation-system 'denote)
+                  (cdr (assoc "second" arche-diary-diaries))))
+    (arche-diary-select-diary "second")
+    (with-temp-buffer
+      (let ((buffer (arche-diary-open-month '(2026 5))))
+        (should (file-in-directory-p (buffer-file-name buffer) second-dir))
+        (should (string-match-p "--2026-05__" (buffer-file-name buffer)))
+        (with-current-buffer buffer
+          (goto-char (point-max))
+          (insert "* 2026-05-15 Friday\n** denote note\nx\n")
+          (save-buffer)
+          (arche-diary-export-html '(2026 5))))
+      (should (string-match-p "denote note"
+                              (arche-diary-tests--read-file
+                               (expand-file-name "2026-05.html" second-html)))))))
+
+(ert-deftest arche-diary-tests/every-command-runs-in-its-diary ()
+  ;; A new command left out of this would use the global settings, and
+  ;; write to the wrong diary.
+  (let ((missing nil))
+    (mapatoms
+     (lambda (symbol)
+       (let ((name (symbol-name symbol)))
+         (when (and (commandp symbol)
+                    (string-prefix-p "arche-diary-" name)
+                    (not (string-prefix-p "arche-diary--" name))
+                    (not (string-prefix-p "arche-diary-tests" name))
+                    (not (eq symbol 'arche-diary-select-diary))
+                    (not (advice-member-p #'arche-diary--in-current-diary symbol)))
+           (push symbol missing)))))
+    (should-not missing))
+  (should (advice-member-p #'arche-diary--in-current-diary
+                           'arche-diary--link-follow)))
+
 ;;;; math
 
 (ert-deftest arche-diary-tests/export-escapes-math-for-html ()

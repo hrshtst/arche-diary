@@ -41,6 +41,32 @@
   :group 'arche-diary
   :type 'directory)
 
+(defcustom arche-diary-diaries nil
+  "Diaries to keep side by side, each with its own settings.
+An alist of (NAME . SETTINGS), where SETTINGS is an alist of
+\(VARIABLE . VALUE) for any of this package's options.  Each must set
+`arche-diary-directory'.  For example:
+
+  ((\"diary\"  (arche-diary-directory . \"~/notes/diary\")
+             (arche-diary-html-directory . \"~/www/diary\")
+             (arche-diary-html-page-title . \"Diary\"))
+   (\"invest\" (arche-diary-directory . \"~/notes/invest\")
+             (arche-diary-html-directory . \"~/www/invest\")
+             (arche-diary-html-page-title . \"Investing\")))
+
+A command runs in the diary holding the current buffer's file, or else
+the one chosen with `arche-diary-select-diary', or else the first.
+
+A diary uses the global value of any option it doesn't set, so those
+are shared.  The exceptions are `arche-diary-html-directory' and
+`arche-diary-image-directory', which default to subdirectories of its
+own `arche-diary-directory', so that no diary can overwrite another's
+pages.  With nil there is a single diary, set by the global values."
+  :group 'arche-diary
+  :type '(alist :key-type (string :tag "Name")
+                :value-type (alist :key-type (symbol :tag "Variable")
+                                   :value-type (sexp :tag "Value"))))
+
 (defcustom arche-diary-html-directory nil
   "Directory where exported HTML files are written.
 When nil, the `html' subdirectory of `arche-diary-directory' is
@@ -2239,6 +2265,102 @@ which the link then replaces."
   (when (use-region-p)
     (delete-region (region-beginning) (region-end)))
   (insert (org-link-make-string (concat "diary:" path) description)))
+
+
+;;; Several diaries
+
+(defvar arche-diary--selected-diary nil
+  "Name of the diary chosen with `arche-diary-select-diary', or nil.")
+
+(defvar arche-diary--active-diary nil
+  "Name of the diary a command is running in, or nil.
+While it is set, what the command calls stays in that diary.  It has
+to: much of an export runs in temporary buffers that belong to no
+diary, and would otherwise fall back to the selected one.")
+
+(defun arche-diary--current-diary-entry ()
+  "Return the entry of `arche-diary-diaries' a command would run in now.
+That is the diary holding the current buffer's file, or else the
+selected one, or else the first.  Return nil with no diaries configured."
+  (when arche-diary-diaries
+    (or (and buffer-file-name
+             (seq-find
+              (lambda (diary)
+                (let ((directory (alist-get 'arche-diary-directory (cdr diary))))
+                  (and directory
+                       (file-in-directory-p buffer-file-name directory))))
+              arche-diary-diaries))
+        (assoc arche-diary--selected-diary arche-diary-diaries)
+        (car arche-diary-diaries))))
+
+;;;###autoload
+(defun arche-diary-current-diary ()
+  "Return the name of the current diary, or nil with none configured.
+See `arche-diary-diaries'."
+  (or arche-diary--active-diary
+      (car (arche-diary--current-diary-entry))))
+
+(defun arche-diary--call-in-diary (diary function)
+  "Call FUNCTION with the settings of DIARY, an `arche-diary-diaries' entry.
+The output directories are bound to nil unless the diary sets them,
+which puts them under its own directory.  Falling back to their global
+values would write over another diary's pages."
+  (let ((settings (cdr diary)))
+    (unless (alist-get 'arche-diary-directory settings)
+      (user-error "Diary %s doesn't set `arche-diary-directory'" (car diary)))
+    (dolist (variable '(arche-diary-html-directory arche-diary-image-directory))
+      (unless (assq variable settings)
+        (push (list variable) settings)))
+    (let ((arche-diary--active-diary (car diary)))
+      (cl-progv (mapcar #'car settings) (mapcar #'cdr settings)
+        (funcall function)))))
+
+(defun arche-diary--call-in-current-diary (function)
+  "Call FUNCTION with the settings of the current diary.
+Just call it if there are no diaries, or if a command is already running
+in one."
+  (if (or arche-diary--active-diary (null arche-diary-diaries))
+      (funcall function)
+    (arche-diary--call-in-diary (arche-diary--current-diary-entry) function)))
+
+(defun arche-diary--in-current-diary-interactively (spec)
+  "Evaluate SPEC, a command's interactive form, in the current diary."
+  (arche-diary--call-in-current-diary
+   (lambda () (advice-eval-interactive-spec spec))))
+
+(defun arche-diary--in-current-diary (command &rest args)
+  "Run COMMAND with ARGS in the current diary.
+Advice, so that a command's prompts and its body both see the settings
+without each of them having to ask for them."
+  (interactive #'arche-diary--in-current-diary-interactively)
+  (arche-diary--call-in-current-diary (lambda () (apply command args))))
+
+(dolist (command '(arche-diary-open-month
+                   arche-diary-add-date
+                   arche-diary-visit-date
+                   arche-diary-fill-dates
+                   arche-diary-insert-image
+                   arche-diary-insert-gallery
+                   arche-diary-export-html
+                   arche-diary-insert-entry-link
+                   arche-diary--link-follow))
+  (advice-add command :around #'arche-diary--in-current-diary))
+
+;;;###autoload
+(defun arche-diary-select-diary (name)
+  "Make the diary NAME current, and open its file for this month.
+This is how to get to another diary: while the current buffer belongs to
+a diary, commands stay in that one.  The file is created if needed, so
+it also starts a new diary.  See `arche-diary-diaries'."
+  (interactive
+   (list (if arche-diary-diaries
+             (completing-read "Diary: " (mapcar #'car arche-diary-diaries) nil t)
+           (user-error "No diaries are set in `arche-diary-diaries'"))))
+  (let ((diary (assoc name arche-diary-diaries)))
+    (unless diary
+      (user-error "No diary named %s" name))
+    (setq arche-diary--selected-diary name)
+    (arche-diary--call-in-diary diary #'arche-diary-open-month)))
 
 
 (provide 'arche-diary)
