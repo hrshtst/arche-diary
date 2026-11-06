@@ -828,10 +828,49 @@ either the diary's copy of SRC or SRC itself."
       ;; sits, and the export is the only thing that copies it.
       (arche-diary-tests--write-image-note src t)
       (should (equal (arche-diary-tests--contents
-                      (expand-file-name "images/inplace.jpg"
-                                        arche-diary-html-directory))
+                      (cdr (arche-diary--export-image-dest src)))
                      "STRIPPED"))
       (should (equal (arche-diary-tests--contents src) "JPEGDATA")))))
+
+(ert-deftest arche-diary-tests/export-same-named-images-stay-distinct ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((arche-diary-image-directory
+            (expand-file-name "images" arche-diary-directory))
+           (arche-diary-html-strip-image-metadata nil)
+           (a (expand-file-name "a/x.png" tmpdir))
+           (b (expand-file-name "b/x.png" tmpdir))
+           (dest-a (arche-diary--export-image-dest a))
+           (dest-b (arche-diary--export-image-dest b))
+           (rewrite (lambda (path)
+                      (arche-diary--rewrite-image-links-for-export
+                       (format "[[file:%s]]" path)))))
+      (dolist (f (list a b))
+        (make-directory (file-name-directory f) t))
+      (with-temp-file a (insert "AAAA"))
+      (with-temp-file b (insert "BBBB"))
+      ;; Each link points at its own destination, holding its own bytes.
+      (should-not (equal (car dest-a) (car dest-b)))
+      (should (equal (funcall rewrite a) (format "[[file:%s]]" (car dest-a))))
+      (should (equal (funcall rewrite b) (format "[[file:%s]]" (car dest-b))))
+      (should (equal (arche-diary-tests--contents (cdr dest-a)) "AAAA"))
+      (should (equal (arche-diary-tests--contents (cdr dest-b)) "BBBB"))
+      ;; The destination is stable and stays an image of the same type.
+      (should (equal (arche-diary--export-image-dest a) dest-a))
+      (should (string-match-p "\\`images/x-[0-9a-f]\\{8\\}\\.png\\'"
+                              (car dest-a))))))
+
+(ert-deftest arche-diary-tests/export-image-dest-keeps-image-dir-subtree ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory)))
+      (should (equal (car (arche-diary--export-image-dest
+                           (expand-file-name "2026-05-15/a.png"
+                                             arche-diary-image-directory)))
+                     "images/2026-05-15/a.png"))
+      (should (equal (car (arche-diary--export-image-dest
+                           (expand-file-name "a.png"
+                                             arche-diary-image-directory)))
+                     "images/a.png")))))
 
 (ert-deftest arche-diary-tests/export-strip-can-be-disabled ()
   (arche-diary-tests--with-dir 'plain

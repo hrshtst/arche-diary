@@ -93,6 +93,9 @@ so you can type the caption.
 On HTML export, every referenced image is copied into
 `arche-diary-html-directory` (mirroring its subtree under `images/`) and the
 `<img>` `src` is rewritten so the exported HTML folder is self-contained.
+An image from outside `arche-diary-image-directory` goes directly under
+`images/`, with a short hash of its path in the filename so that same-named
+images from different folders don't collide.
 
 #### Metadata (EXIF) stripping
 

@@ -1314,11 +1314,24 @@ left on the caption line."
     (setq s (replace-regexp-in-string ">" "&gt;" s t t))
     s))
 
+(defun arche-diary--hashed-image-name (abs)
+  "Return the filename of ABS with a short hash of its full path added.
+For example, `/some/dir/photo.jpg' gives `photo-1a2b3c4d.jpg'.  The
+path is encoded first so that the hash does not depend on the locale."
+  (format "%s-%s%s"
+          (file-name-base abs)
+          (substring (sha1 (encode-coding-string abs 'utf-8)) 0 8)
+          (file-name-extension abs t)))
+
 (defun arche-diary--export-image-dest (abs-src)
   "Return (RELDEST . ABSDEST) for ABS-SRC in the html image tree.
 RELDEST is forward-slashed and relative to
 `arche-diary-html-directory'; ABSDEST is its absolute path.
-Images under `arche-diary-image-directory' keep their subtree."
+Images under `arche-diary-image-directory' keep their subtree.  Any
+other image has no subtree to keep, so its filename takes a hash of
+its path: same-named images from different directories must not share
+a destination, or `arche-diary--image-copy-current-p' would accept one
+image's copy as current for the other."
   (let* ((image-dir (arche-diary--image-directory))
          (img-root (file-name-as-directory (expand-file-name image-dir)))
          (sub (file-name-as-directory
@@ -1327,7 +1340,7 @@ Images under `arche-diary-image-directory' keep their subtree."
          (abs (expand-file-name abs-src))
          (rel (if (string-prefix-p img-root abs)
                   (concat sub (substring abs (length img-root)))
-                (concat sub (file-name-nondirectory abs)))))
+                (concat sub (arche-diary--hashed-image-name abs)))))
     (cons rel (expand-file-name rel (arche-diary--html-directory)))))
 
 (defun arche-diary--rewrite-image-links-for-export (str)
