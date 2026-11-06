@@ -1350,6 +1350,82 @@ left on the caption line."
         (goto-char caption-pos)
         (end-of-line))))))
 
+(declare-function dired-get-marked-files "dired")
+(declare-function dired-marker-regexp "dired")
+
+(defun arche-diary--marked-images-in-dired-windows ()
+  "Return the image files marked in a visible Dired window, in its order.
+Return nil if none are.  A Dired buffer with nothing marked would
+answer with the file at point, so it needs an explicit check for marks."
+  (seq-some
+   (lambda (window)
+     (with-current-buffer (window-buffer window)
+       (when (and (derived-mode-p 'dired-mode)
+                  (save-excursion
+                    (goto-char (point-min))
+                    (re-search-forward (dired-marker-regexp) nil t)))
+         (seq-filter #'arche-diary--image-file-p (dired-get-marked-files)))))
+   (window-list)))
+
+(defun arche-diary--read-images-from-directory ()
+  "Ask for a folder, then for any number of images in it.
+Return their absolute paths in the order they were picked.  The images
+are offered newest first, which suits a folder of recent photographs."
+  (let* ((directory (read-directory-name "Folder of images: " nil nil t))
+         (default-directory directory)
+         (images (sort (seq-filter
+                        (lambda (name)
+                          (and (arche-diary--image-file-p name)
+                               (file-regular-p name)))
+                        (directory-files directory))
+                       #'file-newer-than-file-p)))
+    (unless images
+      (user-error "No images in %s" directory))
+    (mapcar #'expand-file-name
+            (completing-read-multiple
+             "Images (comma-separated): "
+             (lambda (string pred action)
+               (if (eq action 'metadata)
+                   '(metadata (category . file)
+                              (display-sort-function . identity)
+                              (cycle-sort-function . identity))
+                 (complete-with-action action images string pred)))
+             nil t))))
+
+;;;###autoload
+(defun arche-diary-insert-gallery (sources &optional no-copy)
+  "Insert the image files SOURCES at point as one gallery.
+Each is handled as by `arche-diary-insert-image' with GALLERY non-nil:
+with point already inside a gallery they are appended to it, otherwise
+a new one is created, and NO-COPY links the originals in place.  If a
+file can't be read, nothing is inserted.
+
+Called interactively, SOURCES are the images marked in a visible Dired
+window.  With none marked, you pick from the images in a folder.  A
+prefix argument (\\[universal-argument]) inverts
+`arche-diary-image-copy' for that call.
+
+Point is left on the first new caption."
+  (interactive
+   (list (or (arche-diary--marked-images-in-dired-windows)
+             (arche-diary--read-images-from-directory))
+         (if current-prefix-arg
+             arche-diary-image-copy
+           (not arche-diary-image-copy))))
+  (unless sources
+    (user-error "No images selected"))
+  (dolist (source sources)
+    (unless (file-readable-p source)
+      (user-error "Cannot read image file: %s" source)))
+  (let ((first-caption nil))
+    (dolist (source sources)
+      (arche-diary-insert-image source no-copy t)
+      (unless first-caption
+        (setq first-caption (point-marker))))
+    (goto-char first-caption)
+    (set-marker first-caption nil))
+  (message "Inserted %d image(s)" (length sources)))
+
 
 ;;; HTML export
 

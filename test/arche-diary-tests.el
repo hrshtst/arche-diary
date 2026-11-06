@@ -1200,6 +1200,203 @@ either the diary's copy of SRC or SRC itself."
         (arche-diary-export-html '(2026 5))
         (should (equal (arche-diary-tests--contents html-copy) "STRIPPED"))))))
 
+;;;; multi-image galleries
+
+(defun arche-diary-tests--make-files (dir &rest names)
+  "Create files NAMES in DIR and return their absolute paths."
+  (make-directory dir t)
+  (mapcar (lambda (name)
+            (let ((path (expand-file-name name dir)))
+              (with-temp-file path (insert "IMAGEDATA"))
+              path))
+          names))
+
+(defun arche-diary-tests--count (regexp string)
+  "Return how many times REGEXP matches in STRING."
+  (with-temp-buffer
+    (insert string)
+    (goto-char (point-min))
+    (how-many regexp)))
+
+(ert-deftest arche-diary-tests/insert-gallery-puts-all-in-one-block ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (sources (arche-diary-tests--make-files
+                    (expand-file-name "pics" tmpdir) "a.png" "b.png" "c.png")))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (insert "** trip\n")
+        (arche-diary-insert-gallery sources)
+        (let ((text (buffer-string)))
+          (should (= 1 (arche-diary-tests--count "^#\\+begin_gallery$" text)))
+          (should (= 1 (arche-diary-tests--count "^#\\+end_gallery$" text)))
+          (should (= 3 (arche-diary-tests--count "^#\\+CAPTION: $" text)))
+          (should (= 3 (arche-diary-tests--count
+                        (format ":width %s" arche-diary-image-gallery-width)
+                        text)))
+          (should (string-match-p
+                   "a\\.png\\(?:.\\|\n\\)*b\\.png\\(?:.\\|\n\\)*c\\.png" text)))
+        ;; Point waits on the first caption, the first one to type.
+        (should (equal (arche-diary-tests--line-at-point) "#+CAPTION: "))
+        (should (eolp))
+        (save-excursion
+          (forward-line 1)
+          (should (looking-at-p "#\\+NAME: fig:a")))
+        (save-buffer))
+      (arche-diary-export-html '(2026 5))
+      (let ((page (arche-diary-tests--page "2026-05.html")))
+        (should (= 1 (arche-diary-tests--count "class=\"gallery\"" page)))
+        (should (= 3 (arche-diary-tests--count "class=\"figure\"" page))))
+      (should (equal (arche-diary-tests--contents
+                      (expand-file-name "images/2026-05-15/c.png"
+                                        arche-diary-html-directory))
+                     "STRIPPED")))))
+
+(ert-deftest arche-diary-tests/insert-gallery-appends-to-the-gallery-at-point ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (sources (arche-diary-tests--make-files
+                    (expand-file-name "pics" tmpdir) "a.png" "b.png" "c.png")))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (arche-diary-insert-image (car sources) nil t)
+        (arche-diary-insert-gallery (cdr sources))
+        (should (= 1 (arche-diary-tests--count "^#\\+begin_gallery$"
+                                               (buffer-string))))
+        (should (= 3 (arche-diary-tests--count "^#\\+CAPTION: $"
+                                               (buffer-string))))
+        ;; Point waits on the first new caption, not the old one.
+        (save-excursion
+          (forward-line 1)
+          (should (looking-at-p "#\\+NAME: fig:b")))))))
+
+(ert-deftest arche-diary-tests/insert-gallery-can-link-in-place ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (sources (arche-diary-tests--make-files
+                    (expand-file-name "pics" tmpdir) "a.png" "b.png")))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (arche-diary-insert-gallery sources t)
+        (should (string-match-p "pics/a\\.png" (buffer-string))))
+      (should-not (file-exists-p arche-diary-image-directory)))))
+
+(ert-deftest arche-diary-tests/insert-gallery-changes-nothing-on-a-bad-file ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (sources (arche-diary-tests--make-files
+                    (expand-file-name "pics" tmpdir) "a.png")))
+      (with-current-buffer (arche-diary-open-month '(2026 5))
+        (arche-diary-add-date "15")
+        (goto-char (point-max))
+        (let ((before (buffer-string)))
+          (should-error (arche-diary-insert-gallery
+                         (append sources
+                                 (list (expand-file-name "missing.png" tmpdir))))
+                        :type 'user-error)
+          (should-error (arche-diary-insert-gallery nil) :type 'user-error)
+          (should (equal (buffer-string) before))))
+      (should-not (file-exists-p arche-diary-image-directory)))))
+
+(ert-deftest arche-diary-tests/insert-gallery-uses-marks-in-a-visible-dired ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((arche-diary-image-directory
+            (expand-file-name "images" arche-diary-directory))
+           (pics (expand-file-name "pics" tmpdir))
+           (dired-buffer nil))
+      (arche-diary-tests--make-files pics "a.png" "b.jpg" "c.png" "notes.txt")
+      (unwind-protect
+          (save-window-excursion
+            (setq dired-buffer (dired-noselect pics))
+            (with-current-buffer dired-buffer
+              (dired-mark-files-regexp "\\`\\(a\\.png\\|c\\.png\\|notes\\.txt\\)\\'"))
+            (with-current-buffer (arche-diary-open-month '(2026 5))
+              (arche-diary-add-date "15")
+              (goto-char (point-max))
+              (delete-other-windows)
+              (set-window-buffer (split-window) dired-buffer)
+              ;; No prompt: the marks are the answer, images only, in order.
+              (cl-letf (((symbol-function 'read-directory-name)
+                         (lambda (&rest _) (error "Should not prompt"))))
+                (call-interactively #'arche-diary-insert-gallery))
+              (let ((text (buffer-string)))
+                (should (= 2 (arche-diary-tests--count "^#\\+CAPTION: $" text)))
+                (should (string-match-p "a\\.png\\(?:.\\|\n\\)*c\\.png" text))
+                (should-not (string-match-p "b\\.jpg\\|notes\\.txt" text)))))
+        (when dired-buffer (kill-buffer dired-buffer))))))
+
+(ert-deftest arche-diary-tests/insert-gallery-prompts-without-marks ()
+  (arche-diary-tests--with-dir 'plain
+    (let* ((arche-diary-image-directory
+            (expand-file-name "images" arche-diary-directory))
+           (pics (expand-file-name "pics" tmpdir))
+           (dired-buffer nil)
+           (offered nil))
+      (pcase-let ((`(,old ,new ,_) (arche-diary-tests--make-files
+                                    pics "old.png" "new.jpg" "notes.txt")))
+        (set-file-times old '(20000 0))
+        (set-file-times new '(30000 0)))
+      (unwind-protect
+          (save-window-excursion
+            ;; An open Dired with nothing marked doesn't count.
+            (setq dired-buffer (dired-noselect pics))
+            (with-current-buffer (arche-diary-open-month '(2026 5))
+              (arche-diary-add-date "15")
+              (goto-char (point-max))
+              (delete-other-windows)
+              (set-window-buffer (split-window) dired-buffer)
+              (cl-letf (((symbol-function 'read-directory-name)
+                         (lambda (&rest _) pics))
+                        ((symbol-function 'completing-read-multiple)
+                         (lambda (_prompt table &rest _)
+                           (setq offered (all-completions "" table))
+                           (should (eq (alist-get 'display-sort-function
+                                                  (cdr (funcall table "" nil 'metadata)))
+                                       'identity))
+                           '("old.png" "new.jpg"))))
+                (call-interactively #'arche-diary-insert-gallery))
+              ;; Images only, newest first; inserted in the order picked.
+              (should (equal offered '("new.jpg" "old.png")))
+              (should (string-match-p "old\\.png\\(?:.\\|\n\\)*new\\.jpg"
+                                      (buffer-string)))))
+        (when dired-buffer (kill-buffer dired-buffer))))))
+
+(ert-deftest arche-diary-tests/insert-gallery-prompt-needs-an-image ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((pics (expand-file-name "pics" tmpdir)))
+      (arche-diary-tests--make-files pics "notes.txt")
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _) pics)))
+        (should-error (arche-diary--read-images-from-directory)
+                      :type 'user-error)))))
+
+(ert-deftest arche-diary-tests/insert-gallery-prefix-inverts-copying ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((arche-diary-image-directory
+           (expand-file-name "images" arche-diary-directory))
+          (arche-diary-image-copy t)
+          (sources (arche-diary-tests--make-files
+                    (expand-file-name "pics" tmpdir) "a.png")))
+      (cl-letf (((symbol-function 'arche-diary--read-images-from-directory)
+                 (lambda () sources)))
+        (with-current-buffer (arche-diary-open-month '(2026 5))
+          (arche-diary-add-date "15")
+          (goto-char (point-max))
+          (let ((current-prefix-arg '(4)))
+            (call-interactively #'arche-diary-insert-gallery))
+          (should (string-match-p "pics/a\\.png" (buffer-string)))
+          (should-not (file-exists-p arche-diary-image-directory))
+          (let ((current-prefix-arg nil))
+            (call-interactively #'arche-diary-insert-gallery))
+          (should (string-match-p "images/2026-05-15/a\\.png" (buffer-string))))))))
+
 ;;;; entry links
 
 (defun arche-diary-tests--write-month (month text)

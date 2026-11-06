@@ -43,6 +43,7 @@ Drop `arche-diary.el` somewhere on your `load-path`, or:
 | `arche-diary-visit-date` | Open the appropriate month and put point at a date heading (creating both if missing). |
 | `arche-diary-fill-dates` | Insert headings for every day in a range. |
 | `arche-diary-insert-image` | Insert an Org image link at point (copying the file by default). |
+| `arche-diary-insert-gallery` | Insert several images at point as one gallery. See [galleries](#multiple-images-in-a-row-galleries). |
 | `arche-diary-insert-entry-link` | Insert a link at point to any published entry in the diary. See [Links to other entries](#links-to-other-entries). |
 | `arche-diary-export-html`| Export to HTML and rebuild `index.html`. With no argument, export every month whose HTML is missing or older than its source (incremental). With a prefix arg, force one month; with `C-u C-u` or `all`, force every month. Forcing also writes those months' images again. |
 
@@ -149,12 +150,23 @@ export: `C-u C-u M-x arche-diary-export-html` writes every month's images again
 #### Multiple images in a row (galleries)
 
 Inserted images stack vertically (each is its own block). To lay several
-side by side, call `arche-diary-insert-image` with a **double prefix
-argument** (`C-u C-u`): the image is wrapped in a `#+begin_gallery` ..
-`#+end_gallery` block, which the export renders as a wrapping horizontal
-row. Invoking it again with `C-u C-u` while point is still inside that
-block appends the next image to the same gallery, so a strip is built up
-incrementally:
+side by side, use `M-x arche-diary-insert-gallery`, which inserts any number of
+images at once in a `#+begin_gallery` .. `#+end_gallery` block. The export
+renders that as a wrapping horizontal row. It takes its images from one of two
+places:
+
+- **Marks in Dired.** Mark the images in a Dired window that is visible, then run
+  the command from your diary buffer. Other marked files are ignored.
+- **A prompt.** With nothing marked, choose a folder, then pick images from it,
+  newest first. Separate them with commas, as with any multiple-choice prompt in
+  Emacs. A filename that contains a comma can only be chosen from Dired.
+
+With point already inside a gallery the images are appended to it, and point ends
+up on the first new caption. A prefix argument (`C-u`) inverts
+`arche-diary-image-copy` for that call.
+
+To add one image, you can also call `arche-diary-insert-image` with a **double
+prefix argument** (`C-u C-u`), which does the same for a single file:
 
 ```org
 #+begin_gallery
@@ -174,8 +186,9 @@ Each image keeps its own `#+CAPTION:`, `#+NAME:` and `#+ATTR_HTML: :width`,
 and the usual copy-into-HTML-dir and `src` rewrite still apply. Gallery
 images default to `arche-diary-image-gallery-width` (220) instead of
 `arche-diary-image-width` so a row fits; edit any `:width` afterwards to
-taste. You can also write the `#+begin_gallery` / `#+end_gallery` wrapper by
-hand around ordinary image blocks — the prefix is just a shortcut.
+taste. A caption you leave blank doesn't appear on the page. You can also write
+the `#+begin_gallery` / `#+end_gallery` wrapper by hand around ordinary image
+blocks — the commands are just a shortcut.
 
 ## Customization
 
