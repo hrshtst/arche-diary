@@ -1434,10 +1434,13 @@ Such a line is never folded onto the preceding one.")
           "\\|[ \t]*|"                  ; table row
           "\\|[ \t]*:"                  ; drawer or fixed-width line
           "\\|\\*+[ \t]"                ; heading
+          "\\|\\(?:.*[^\\\\]\\)?\\\\\\\\[ \t]*$" ; ends in a hard line break
           "\\)")
   "Regexp matching a line that cannot absorb a following continuation.
 List items are absent on purpose: their wrapped continuation lines
-should fold back onto the bullet.")
+should fold back onto the bullet.  A hard line break is here because
+Org only reads `\\\\' as one at the end of a line; a third backslash
+makes it ordinary text, which is why the pattern rules that out.")
 
 (defconst arche-diary--zero-width-space "​"
   "A zero-width space (U+200B).
@@ -1485,7 +1488,8 @@ break would press an Org emphasis marker (e.g. `~code~') directly
 against a CJK character — which Org refuses to parse as emphasis —
 a zero-width space is inserted instead, so the markup survives
 without a visible gap.  Blank lines, headings, lists, tables,
-keywords and `#+begin_..#+end_' blocks keep their own lines."
+keywords and `#+begin_..#+end_' blocks keep their own lines, and a
+line ending in an Org hard line break keeps its newline."
   (let ((acc nil)
         (in-block nil))
     (dolist (line (split-string str "\n"))

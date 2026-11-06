@@ -627,6 +627,26 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
                               (arche-diary--unfill-cjk
                                "リハビリ\nがてら日記を書いた。"))))
 
+(ert-deftest arche-diary-tests/unfill-cjk-keeps-hard-line-break ()
+  ;; A line ending in `\\' keeps its newline, whatever the script...
+  (dolist (str '("foo\\\\\nbar"
+                 "あいう\\\\\nえお"
+                 "foo\\\\  \nbar"
+                 "\\\\\nbar"))
+    (should (equal (arche-diary--unfill-cjk str) str)))
+  ;; ...and the line after it can still absorb its own continuation.
+  (should (equal (arche-diary--unfill-cjk "あ\\\\\nい\nう") "あ\\\\\nいう"))
+  ;; Three backslashes are not a hard break to Org, so that line still folds.
+  (should (equal (arche-diary--unfill-cjk "foo\\\\\\\nbar") "foo\\\\\\ bar")))
+
+(ert-deftest arche-diary-tests/export-keeps-hard-line-break ()
+  (let ((arche-diary-html-unfill-cjk t))
+    (should (string-match-p "foo<br />\\s-*bar"
+                            (arche-diary--org-string-to-html "foo\\\\\nbar")))
+    (should (string-match-p "あいう<br />\\s-*えお"
+                            (arche-diary--org-string-to-html
+                             "あいう\\\\\nえお")))))
+
 (ert-deftest arche-diary-tests/export-unfills-cjk-lines ()
   (arche-diary-tests--with-dir 'plain
     (with-current-buffer (arche-diary-open-month '(2026 5))

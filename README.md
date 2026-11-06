@@ -237,9 +237,10 @@ becomes a single space and `#+begin_…` blocks are left verbatim. If a
 dropped break would push an emphasis marker (such as `~code~` or
 `*bold*`) hard against a CJK character — e.g. you wrapped right before
 `~Fuzzel~` — a zero-width space is inserted so the markup still renders,
-without leaving any visible gap. Only the
-exported HTML is affected; your Org files keep their wrapping. The whole
-thing is a no-op for diaries with no CJK text — set it to nil to turn it
+without leaving any visible gap. A line ending in an Org hard line break
+(`\\`) keeps its newline, so the break still renders. Only the
+exported HTML is affected; your Org files keep their wrapping. Wrapped
+lines with no CJK render the same either way — set it to nil to turn it
 off entirely.
 
 ### Confidential sections that are not exported
