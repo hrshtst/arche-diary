@@ -1,6 +1,8 @@
 #!/bin/sh
 # upload-diary --- mirror arche-diary's HTML export to a host via FTPS
 #
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
 # A sample deploy script meant to be invoked from
 # `arche-diary-after-export-hook'.  Intentionally minimal:
 # `arche-diary' itself stays transport-agnostic, so transfer logic,
