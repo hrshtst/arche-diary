@@ -705,11 +705,15 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
   (cl-flet ((render (str unfill)
               (let ((arche-diary-html-unfill-cjk unfill))
                 ;; Headings get random ids, so those can't be compared.
+                ;; Org 9.7 keeps the space after a timestamp inside its
+                ;; span, which looks the same in a browser.
                 (replace-regexp-in-string
-                 "[ \t\n]+" " "
+                 " </span>" "</span>"
                  (replace-regexp-in-string
-                  "\\(id=\"\\)[^\"]*" "\\1"
-                  (arche-diary--org-string-to-html str))))))
+                  "[ \t\n]+" " "
+                  (replace-regexp-in-string
+                   "\\(id=\"\\)[^\"]*" "\\1"
+                   (arche-diary--org-string-to-html str)))))))
     (dolist (str '("foo\nbar"
                    "foo\\\\\nbar"
                    "foo\\\\\\\nbar"
@@ -2522,7 +2526,5 @@ Return (EXIT-STATUS . OUTPUT)."
       ;; A fresh scope reflects the new content.
       (arche-diary--with-export-caches
         (should (= 2 (length (arche-diary--month-data path))))))))
-
-(provide 'arche-diary-tests)
 
 ;;; arche-diary-tests.el ends here

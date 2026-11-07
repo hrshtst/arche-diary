@@ -27,8 +27,15 @@
 
 ;;; Commentary:
 
-;; arche-diary helps you keep a private monthly diary in Org mode and
-;; export it to a simple HTML site.  See README.md for usage.
+;; arche-diary keeps a private diary in Org mode, with one file per month
+;; and a heading per day, and exports it to a simple HTML site with the
+;; newest entries first.  Headings tagged :noexport: stay off the site.
+;; Published images lose their location and camera metadata, while the
+;; originals in your diary keep theirs.
+;;
+;; Start with `arche-diary-open-month', `arche-diary-add-date' and
+;; `arche-diary-export-html'.  Full documentation is at
+;; https://github.com/hrshtst/arche-diary
 
 ;;; Code:
 
@@ -257,8 +264,8 @@ image is left out with a warning, and any older copy of it stays."
     ("magick" "mogrify" "-auto-orient" "-strip"))
   "Candidate commands that strip an image file's metadata in place.
 Each element is a list (PROGRAM ARGS...).  The first PROGRAM found
-in `exec-path' is used, with the file to strip appended as the
-final argument, so the command must rewrite the file it is given.
+in the variable `exec-path' is used, with the file to strip appended
+as the final argument, so the command must rewrite the file it is given.
 
 The default prefers exiftool because it rewrites only the metadata
 segments, whereas ImageMagick's `mogrify -strip' re-encodes the
@@ -1945,7 +1952,7 @@ A match inside a code block only loads a script that has nothing to
 do: MathJax skips those.")
 
 (defun arche-diary--html-mathjax-script (body)
-  "Return the tag loading MathJax if BODY contains math, else \"\".
+  "Return the tag loading MathJax if BODY has math, else \"\".
 Org's own document template would load it, but the pages are assembled
 here from body-only exports, so nothing else does."
   (if (and arche-diary-html-mathjax-url
@@ -2377,7 +2384,6 @@ it also starts a new diary.  See `arche-diary-diaries'."
       (user-error "No diary named %s" name))
     (setq arche-diary--selected-diary name)
     (arche-diary--call-in-diary diary #'arche-diary-open-month)))
-
 
 (provide 'arche-diary)
 

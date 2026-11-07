@@ -10,7 +10,7 @@ make compile    # byte-compile arche-diary.el — must finish with no warnings
 make clean      # remove *.elc
 ```
 
-The Makefile expects denote and org under `~/.emacs.d/straight/build/{denote,org}`. Override with `DENOTE_DIR=...` / `ORG_DIR=...` / `EMACS=...` if needed.
+The Makefile expects denote and org under `~/.emacs.d/straight/build/{denote,org}`. Override with `DENOTE_DIR=...` / `ORG_DIR=...` / `EMACS=...` if needed. The straight Org is a development build, so after touching export code also run `make test ORG_DIR=/nonexistent`, which uses the Org built into Emacs: that is what most users have, and the two render differently in places.
 
 By default Emacs loads a stale `arche-diary.elc` in preference to the source (it only warns "using older file"), so edits can appear to pass. `make test` and the command below set `load-prefer-newer` to rule that out; any other batch run that loads the package needs the same.
 
