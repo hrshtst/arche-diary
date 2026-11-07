@@ -47,6 +47,7 @@ All code is in `arche-diary.el` and all tests in `test/arche-diary-tests.el`, wh
 
 - **Not a whole-file export**, because date and note order are reversed. `--read-month-data` walks the file by regexp and each note body goes through `--org-string-to-html`, so file-level keywords such as `#+OPTIONS` are ignored.
 - **Exclusion.** The walker runs before any exporter, so it drops level 1-2 headings tagged from `arche-diary-html-noexport-tags` itself (`--heading-excluded-p`). Levels 3+ rely on Org's `org-export-exclude-tags`.
+- **Subheadings.** A note's title is `<h3>`, but Org numbers a body's headings from its own top, so `--org-string-to-html` sets `org-html-toplevel-hlevel` to 4. Without it `***` would outrank the title.
 - **Incremental.** With no argument, `arche-diary-export-html` renders only stale months (`--month-html-stale-p`), and with none stale it does nothing, not even the hook. It compares source mtimes, so check a renderer, CSS or option change with `'all` or an explicit month. This is safe because nav never links forward and `index.html` is rebuilt whenever a month is exported.
 - **Caches.** `--with-export-caches` memoizes listings and `--month-data` for one export, which is sound only because sources don't change during it.
 - **Links section.** The level-1 `arche-diary-links-heading` subtree is parsed by regexp, not the exporter. Date scans ignore it, so it never renders as a body section. A nil heading disables parse, render and seed.

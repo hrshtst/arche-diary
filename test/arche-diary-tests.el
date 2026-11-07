@@ -436,6 +436,25 @@ BACKEND is the value bound to `arche-diary-file-creation-system'."
       (should (< (string-match "<h3>Second" html)
                  (string-match "<h3>First" html))))))
 
+(ert-deftest arche-diary-tests/export-ranks-subheadings-below-the-note-title ()
+  (arche-diary-tests--with-dir 'plain
+    (let ((path (arche-diary--ensure-monthly-file 2026 5)))
+      (with-current-buffer (find-file-noselect path)
+        (goto-char (point-max))
+        (insert "* 2026-05-15 Friday\n** Note\nBody.\n"
+                "*** Level three\nx\n**** Level four\ny\n***** Level five\nz\n")
+        (save-buffer)))
+    (arche-diary-export-html '(2026 5))
+    (let ((html (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "2026-05.html"
+                                     arche-diary-html-directory))
+                  (buffer-string))))
+      (should (string-match-p "<h3>Note</h3>" html))
+      (should (string-match-p "<h4[^>]*>Level three</h4>" html))
+      (should (string-match-p "<h5[^>]*>Level four</h5>" html))
+      (should (string-match-p "<h6[^>]*>Level five</h6>" html)))))
+
 (ert-deftest arche-diary-tests/export-shows-page-title-on-body ()
   (arche-diary-tests--with-dir 'plain
     (arche-diary-fill-dates "2026-05-10" "2026-05-11")

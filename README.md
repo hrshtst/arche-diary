@@ -10,7 +10,7 @@ organized one file per month, with a simple HTML export.
 - Each day is a level-1 heading, e.g. `* 2026-05-15 Friday`. Days are written
   top-to-bottom in chronological order.
 - Within a day, level-2 headings are short notes, also written top-to-bottom
-  in the order events happened.
+  in the order events happened. Deeper headings are subheadings inside a note.
 - Exported HTML reverses both axes: newest day at the top, newest note within
   each day at the top.
 - Each page's header title links to `index.html`. Below it, a compact nav

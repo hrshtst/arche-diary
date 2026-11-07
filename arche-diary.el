@@ -301,10 +301,13 @@ Set to nil to disable heading-level exclusion."
 body { margin:2rem auto; max-width:40rem; padding:0 1rem;
        font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
        color:var(--fg); background:var(--bg); line-height:1.6; }
-h1,h2,h3 { font-weight:600; }
+h1,h2,h3,h4,h5,h6 { font-weight:600; }
 h1 { font-size:1.6rem; margin-top:2rem; }
 h2 { font-size:1.2rem; }
-h3 { font-size:1.0rem; color:var(--muted); }
+h3,h4,h5,h6 { color:var(--muted); }
+h3 { font-size:1.0rem; }
+h4 { font-size:.95rem; }
+h5,h6 { font-size:.9rem; }
 a { color:var(--link); text-decoration:none; }
 a:hover { text-decoration:underline; }
 nav { margin:0 0 1rem 0; font-size:.9rem; color:var(--muted);
@@ -316,6 +319,7 @@ hr.note-sep { border-top:1px dashed #eee; margin:.25rem 0; }
 article.date { margin-bottom:1rem; }
 section.note { margin:.25rem 0; }
 section.note h3 { margin:.25rem 0; }
+section.note h4,section.note h5,section.note h6 { margin:.75rem 0 .25rem; }
 section.note p { margin:.5rem 0; }
 img { max-width:100%; height:auto; }
 .figure { margin:1rem 0; display:flow-root; }
@@ -1717,8 +1721,11 @@ Escaped, the browser decodes it and MathJax sees the original."
 Hard-wrapped CJK lines are folded (see `arche-diary-html-unfill-cjk'),
 image file links are copied into the html directory and rewritten so
 the exported page can resolve them, and math is left for MathJax (see
-`arche-diary-html-mathjax-url') whatever `org-html-with-latex' says."
+`arche-diary-html-mathjax-url') whatever `org-html-with-latex' says.
+Headings in STR start at <h4>, below the <h3> of a note's title; Org
+numbers them from the top of STR, which would make them outrank it."
   (let* ((org-html-with-latex 'mathjax)
+         (org-html-toplevel-hlevel 4)
          (org-export-filter-latex-fragment-functions
           (append org-export-filter-latex-fragment-functions
                   (list #'arche-diary--escape-math-for-html)))
