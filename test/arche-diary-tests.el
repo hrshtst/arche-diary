@@ -1461,21 +1461,21 @@ either the diary's copy of SRC or SRC itself."
     (cl-flet ((html (str) (arche-diary--org-string-to-html str)))
       (should (string-match-p
                (regexp-quote "<a href=\"2026-04.html#2026-04-10\">the day</a>")
-               (html "[[diary:2026-04-10][the day]]")))
+               (html "[[arche-diary:2026-04-10][the day]]")))
       (should (string-match-p
                (regexp-quote "<a href=\"2026-04.html#2026-04-10-花見\">a note</a>")
-               (html "[[diary:2026-04-10::花見][a note]]")))
+               (html "[[arche-diary:2026-04-10::花見][a note]]")))
       ;; Without a description, the heading is the text.
       (should (string-match-p (regexp-quote ">2026-04-10 Friday</a>")
-                              (html "[[diary:2026-04-10]]")))
+                              (html "[[arche-diary:2026-04-10]]")))
       (should (string-match-p (regexp-quote ">花見</a>")
-                              (html "[[diary:2026-04-10::花見]]")))
+                              (html "[[arche-diary:2026-04-10::花見]]")))
       ;; A description keeps its markup, and folds into Japanese text.
       (should (string-match-p (regexp-quote "><b>the</b> day</a>")
-                              (html "[[diary:2026-04-10][*the* day]]")))
+                              (html "[[arche-diary:2026-04-10][*the* day]]")))
       (should (string-match-p
                (regexp-quote "以前は<a href=\"2026-04.html#2026-04-10\">こちら</a>を参照")
-               (html "以前は\n[[diary:2026-04-10][こちら]]\nを参照"))))))
+               (html "以前は\n[[arche-diary:2026-04-10][こちら]]\nを参照"))))))
 
 (ert-deftest arche-diary-tests/diary-link-lands-on-an-anchor-across-months ()
   (arche-diary-tests--with-dir 'plain
@@ -1483,8 +1483,8 @@ either the diary's copy of SRC or SRC itself."
      4 "* 2026-04-10 Friday\n** 花見\nbody\n** a/b c\nbody\n")
     (arche-diary-tests--write-month
      5 (concat "* 2026-05-15 Friday\n** back\n"
-               "[[diary:2026-04-10]] [[diary:2026-04-10::花見]] "
-               "[[diary:2026-04-10::a/b c]]\n"))
+               "[[arche-diary:2026-04-10]] [[arche-diary:2026-04-10::花見]] "
+               "[[arche-diary:2026-04-10::a/b c]]\n"))
     (arche-diary-export-html 'all)
     (let ((may (arche-diary-tests--page "2026-05.html"))
           (april (arche-diary-tests--page "2026-04.html"))
@@ -1513,7 +1513,7 @@ either the diary's copy of SRC or SRC itself."
                         "2026-09-01"            ; a month that isn't there
                         "not-a-date"))
           (let ((html (arche-diary--org-string-to-html
-                       (format "[[diary:%s]]" path))))
+                       (format "[[arche-diary:%s]]" path))))
             (should-not (string-match-p "<a " html))
             ;; A title in a URL or as the text would publish a hidden note's.
             (should-not (string-match-p "秘密" html))))
@@ -1522,7 +1522,7 @@ either the diary's copy of SRC or SRC itself."
         ;; Its own description is still the author's text to show.
         (should (string-match-p
                  "see it"
-                 (arche-diary--org-string-to-html "[[diary:2026-04-12][see it]]")))))))
+                 (arche-diary--org-string-to-html "[[arche-diary:2026-04-12][see it]]")))))))
 
 (ert-deftest arche-diary-tests/diary-link-follow-opens-its-entry ()
   (arche-diary-tests--with-dir 'plain
@@ -1531,7 +1531,7 @@ either the diary's copy of SRC or SRC itself."
                "* 2026-04-11 Saturday\n** 花見\nz\n"))
     (let ((file (arche-diary--month-file 2026 4)))
       (cl-flet ((opened (path)
-                  (arche-diary--link-follow path)
+                  (arche-diary-link-follow path)
                   (with-current-buffer (get-file-buffer file)
                     (arche-diary-tests--line-at-point))))
         (should (equal (opened "2026-04-10") "* 2026-04-10 Friday"))
@@ -1546,11 +1546,11 @@ either the diary's copy of SRC or SRC itself."
         ;; A renamed note still gets you to its date.
         (should (equal (opened "2026-04-10::gone") "* 2026-04-10 Friday")))
       (dolist (path '("2026-04-20" "2026-09-01" "not-a-date"))
-        (should-error (arche-diary--link-follow path) :type 'user-error))
+        (should-error (arche-diary-link-follow path) :type 'user-error))
       ;; And Org itself reaches it from a link in a buffer.
       (with-temp-buffer
         (org-mode)
-        (insert "[[diary:2026-04-11]]")
+        (insert "[[arche-diary:2026-04-11]]")
         (goto-char 3)
         (org-open-at-point))
       (with-current-buffer (get-file-buffer file)
@@ -1588,7 +1588,7 @@ either the diary's copy of SRC or SRC itself."
         (org-mode)
         (insert "see ")
         (call-interactively #'arche-diary-insert-entry-link)
-        (should (string-prefix-p "see [[diary:" (buffer-string)))
+        (should (string-prefix-p "see [[arche-diary:" (buffer-string)))
         ;; Org follows a closing bracket in a description with a zero-width
         ;; space, so as not to end the link early; that part isn't ours.
         (should (string-match-p
@@ -1605,7 +1605,7 @@ either the diary's copy of SRC or SRC itself."
           (push-mark 9 t t)
           (call-interactively #'arche-diary-insert-entry-link))
         (should (equal (buffer-string)
-                       "see [[diary:2026-04-10][word]] now"))))))
+                       "see [[arche-diary:2026-04-10][word]] now"))))))
 
 (ert-deftest arche-diary-tests/insert-entry-link-needs-an-entry ()
   (arche-diary-tests--with-dir 'plain
@@ -1619,7 +1619,7 @@ either the diary's copy of SRC or SRC itself."
     (arche-diary-tests--write-month
      4 "* 2026-04-10 Friday\n** a\nx\n** b\ny\n")
     (arche-diary-tests--write-month
-     5 "* 2026-05-15 Friday\n** n\n[[diary:2026-04-10]] [[diary:2026-04-10::a]] [[diary:2026-04-10::b]]\n")
+     5 "* 2026-05-15 Friday\n** n\n[[arche-diary:2026-04-10]] [[arche-diary:2026-04-10::a]] [[arche-diary:2026-04-10::b]]\n")
     (let ((reads 0)
           (original (symbol-function 'arche-diary--read-month-data)))
       (cl-letf (((symbol-function 'arche-diary--read-month-data)
@@ -1746,7 +1746,7 @@ would be in a config that used a single diary before adding a second."
         (should (file-in-directory-p
                  (buffer-file-name (arche-diary-visit-date "2026-05-15"))
                  second-dir))
-        (arche-diary--link-follow "2026-05-15")
+        (arche-diary-link-follow "2026-05-15")
         (should (file-in-directory-p (buffer-file-name (window-buffer))
                                      second-dir))))))
 
@@ -1759,8 +1759,8 @@ would be in a config that used a single diary before adding a second."
     (let ((buffer (arche-diary-tests--diary-buffer
                    second-dir 5
                    (concat "* 2026-05-15 Friday\n** n\n"
-                           "[[diary:2026-04-10::only in second]] "
-                           "[[diary:2026-04-10::only in first]]\n")))
+                           "[[arche-diary:2026-04-10::only in second]] "
+                           "[[arche-diary:2026-04-10::only in first]]\n")))
           (warnings nil))
       ;; The first diary is selected, and a note exports in a temporary
       ;; buffer, which belongs to neither.  The diary doesn't change.
@@ -1917,7 +1917,7 @@ would be in a config that used a single diary before adding a second."
            (push symbol missing)))))
     (should-not missing))
   (should (advice-member-p #'arche-diary--in-current-diary
-                           'arche-diary--link-follow)))
+                           'arche-diary-link-follow)))
 
 ;;;; math
 

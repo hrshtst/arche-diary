@@ -289,8 +289,8 @@ A diary shares the global value of any option it doesn't set, so a common langua
 or stylesheet goes in the usual place. The exceptions are
 `arche-diary-html-directory` and `arche-diary-image-directory`, which default to
 `html/` and `images/` under the diary's own directory, so that no diary can
-overwrite another's pages. Each diary needs its own `arche-diary-directory`. `diary:`
-links only reach entries in the same diary.
+overwrite another's pages. Each diary needs its own `arche-diary-directory`.
+`arche-diary:` links only reach entries in the same diary.
 
 Pages only use relative links, so each diary can live in its own folder on one
 server, at `/diary/` and `/invest/` for example. `arche-diary-after-export-hook` runs
@@ -320,9 +320,9 @@ another, since the upload mirrors deletions when told to.
 A note can link to any date or note in the diary, in any month:
 
 ```org
-[[diary:2026-05-15][that day]]
-[[diary:2026-05-15::富士山 ハイク][that note]]
-[[diary:2026-05-15]]
+[[arche-diary:2026-05-15][that day]]
+[[arche-diary:2026-05-15::富士山 ハイク][that note]]
+[[arche-diary:2026-05-15]]
 ```
 
 Without a description, as in the last one, the link's text is the entry's

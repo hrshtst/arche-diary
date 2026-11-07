@@ -2145,11 +2145,11 @@ active."
 
 (defconst arche-diary--link-path-regexp
   "\\`\\(\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-[0-9]\\{2\\}\\)\\(?:::\\(.+\\)\\)?\\'"
-  "Regexp matching the path of a `diary:' link, DATE or DATE::TITLE.
+  "Regexp matching the path of an `arche-diary:' link, DATE or DATE::TITLE.
 Groups: 1 the date, 2 its year, 3 its month, 4 the note's title.")
 
 (defun arche-diary--link-target (path)
-  "Return (PAGE ANCHOR LABEL) for the entry the `diary:' link PATH names.
+  "Return (PAGE ANCHOR LABEL) for the entry the `arche-diary:' link PATH names.
 LABEL is the entry's heading.  Return nil unless it is a published one."
   (when (string-match arche-diary--link-path-regexp path)
     (let* ((iso (match-string 1 path))
@@ -2166,13 +2166,13 @@ LABEL is the entry's heading.  Return nil unless it is a published one."
        (note (list page (cdr note) title))))))
 
 (defun arche-diary--link-plain-text (path desc)
-  "Return the text of the `diary:' link PATH with description DESC, unlinked.
+  "Return the `arche-diary:' link PATH with description DESC as plain text.
 Never includes the title in PATH: it may be that of an unpublished note."
   (or desc (arche-diary--html-escape (car (split-string path "::")))))
 
 ;;;###autoload
-(defun arche-diary--link-export (path desc backend &optional _info)
-  "Export the `diary:' link PATH with description DESC for BACKEND.
+(defun arche-diary-link-export (path desc backend &optional _info)
+  "Export the `arche-diary:' link PATH with description DESC for BACKEND.
 In HTML it becomes a link to the entry on its month's page.  A link to
 no published entry becomes plain text with a warning: an anchor that
 isn't there helps nobody, and the URL of a `:noexport:' note would
@@ -2193,8 +2193,8 @@ publish its title."
        (arche-diary--link-plain-text path desc)))))
 
 ;;;###autoload
-(defun arche-diary--link-follow (path &optional _arg)
-  "Open the diary entry that the `diary:' link PATH names.
+(defun arche-diary-link-follow (path &optional _arg)
+  "Open the diary entry that the `arche-diary:' link PATH names.
 Goes to the note's date if the note isn't under it."
   (unless (string-match arche-diary--link-path-regexp path)
     (user-error "Not a diary link: %s" path))
@@ -2224,11 +2224,13 @@ Goes to the note's date if the note isn't under it."
           (message "No note titled %s under %s" title iso))))
     (org-reveal)))
 
+;; Autoloaded so that links work in Org buffers before this file has
+;; loaded; a type registered here at load time would be unknown until then.
 ;;;###autoload
 (with-eval-after-load 'ol
-  (org-link-set-parameters "diary"
-                           :follow #'arche-diary--link-follow
-                           :export #'arche-diary--link-export))
+  (org-link-set-parameters "arche-diary"
+                           :follow #'arche-diary-link-follow
+                           :export #'arche-diary-link-export))
 
 (defun arche-diary--entry-candidates ()
   "Return (LABEL PATH . DESCRIPTION) for each published entry.
@@ -2278,7 +2280,7 @@ which the link then replaces."
              (cdr target)))))
   (when (use-region-p)
     (delete-region (region-beginning) (region-end)))
-  (insert (org-link-make-string (concat "diary:" path) description)))
+  (insert (org-link-make-string (concat "arche-diary:" path) description)))
 
 
 ;;; Several diaries
@@ -2357,7 +2359,7 @@ without each of them having to ask for them."
                    arche-diary-insert-gallery
                    arche-diary-export-html
                    arche-diary-insert-entry-link
-                   arche-diary--link-follow))
+                   arche-diary-link-follow))
   (advice-add command :around #'arche-diary--in-current-diary))
 
 ;;;###autoload
