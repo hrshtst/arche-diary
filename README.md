@@ -517,3 +517,7 @@ and use `M-x ert RET t RET` to run the suite interactively.
 
 Each test creates its own temporary directory and cleans up after itself,
 so the suite never touches your real `arche-diary-directory`.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE).
